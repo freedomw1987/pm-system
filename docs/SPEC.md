@@ -61,6 +61,12 @@
 - **項目成本報表**：各人員工作時數統計
 - **項目進度報表**：完成進度百分比
 
+### 3.7 AI 助手
+- **LLM 配置**（Admin）— OpenAI 兼容 API，支援任意模型
+- **Wiki 知識庫** — 建立/編輯/搜索 wiki 頁面，作為回答的 context
+- **文件 AI 分析** — 上傳 Word/Markdown/Excel，AI 自動拆解需求和任務，建立 wiki 頁面
+- **AI 聊天問答** — 自然語言查詢項目數據，streaming 回覆
+
 ## 4. 權限矩陣
 
 | 功能 | Admin | PM | Tech Lead | Developer | Tester |

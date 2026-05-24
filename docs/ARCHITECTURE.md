@@ -51,7 +51,8 @@ pm-system/
 ├── docs/                 # 項目文檔
 │   ├── SPEC.md          # 需求規格
 │   ├── ARCHITECTURE.md  # 架構文檔
-│   └── API.md           # API 文檔
+│   ├── API.md           # API 文檔
+│   └── AI-AGENT.md     # AI Agent 規格
 ├── frontend/            # React 前端
 │   ├── src/
 │   │   ├── components/  # 可复用組件
@@ -71,9 +72,9 @@ pm-system/
 │   │   └── utils/     # 工具函數
 │   ├── prisma/         # 數據庫 schema
 │   └── package.json
-├── infra/               # 基礎設施
-│   └── docker-compose.yml
-└── docker/              # Docker 配置
+├── docker-compose.yml          # 本地開發
+├── docker-compose.prod.yml     # 生產環境
+└── nginx.conf                  # 生產 nginx 配置
 ```
 
 ## 4. 數據模型
@@ -208,6 +209,10 @@ pm-system/
 | POST | /api/attachments/upload | 上傳附件 |
 | GET | /api/attachments/:id | 下載附件 |
 | DELETE | /api/attachments/:id | 刪除附件 |
+
+## 5. AI Agent（智能助手）
+
+詳見 `AI-AGENT.md`
 
 ## 6. 安全設計
 
