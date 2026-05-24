@@ -26,7 +26,7 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
           include: { requirement: { select: { id: true, title: true } } }
         },
         workLogs: {
-          select: { id: true, hours: true, workDate: true }
+          select: { id: true, hours: true, date: true }
         }
       },
       orderBy: { createdAt: 'desc' }

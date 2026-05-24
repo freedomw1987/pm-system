@@ -69,10 +69,10 @@ const userRoutes = new Elysia({ prefix: '/users' })
       return { error: { code: 'VALIDATION_ERROR', message: 'Email already exists' } }
     }
 
-    // Validate role if provided
+    // Validate role if provided (must exist in Role table)
     if (role) {
-      const validRoles = ['admin', 'pm', 'tech_lead', 'developer', 'tester', 'visitor']
-      if (!validRoles.includes(role)) {
+      const roleRecord = await prisma.role.findUnique({ where: { name: role } })
+      if (!roleRecord) {
         set.status = 400
         return { error: { code: 'VALIDATION_ERROR', message: 'Invalid role value' } }
       }
@@ -131,10 +131,10 @@ const userRoutes = new Elysia({ prefix: '/users' })
 
     const { prisma } = await import('../utils/prisma')
 
-    // Validate role if provided
+    // Validate role if provided (must exist in Role table)
     if (role) {
-      const validRoles = ['admin', 'pm', 'tech_lead', 'developer', 'tester', 'visitor']
-      if (!validRoles.includes(role)) {
+      const roleRecord = await prisma.role.findUnique({ where: { name: role } })
+      if (!roleRecord) {
         set.status = 400
         return { error: { code: 'VALIDATION_ERROR', message: 'Invalid role value' } }
       }

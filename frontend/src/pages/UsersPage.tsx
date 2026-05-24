@@ -63,7 +63,13 @@ export default function UsersPage() {
     setShowForm(true)
   }
 
-  const roleLabel = (r?: string) => ({ admin: '系統管理員', pm: '項目經理', tech_lead: '技術主管', developer: '開發人員', tester: '測試人員', visitor: '訪客' }[r || ''] || r || '-')
+  const BUILT_IN_LABELS: Record<string, string> = {
+    admin: '系統管理員', pm: '項目經理', tech_lead: '技術主管', developer: '開發人員', tester: '測試人員', visitor: '訪客'
+  }
+  const roleLabel = (r?: string) => {
+    if (!r) return '-'
+    return BUILT_IN_LABELS[r] || r // show name if custom role (not in built-in map)
+  }
   const projectRoleLabel = (r: string) => ({ pm: '項目經理', tech_lead: '技術主管', developer: '開發', tester: '測試' }[r] || r)
 
   return (
@@ -101,7 +107,7 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`badge ${user.role === 'admin' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                  <span className={`badge ${user.role === 'admin' ? 'bg-red-100 text-red-700' : user.role === 'pm' ? 'bg-purple-100 text-purple-700' : user.role === 'developer' ? 'bg-orange-100 text-orange-700' : user.role === 'tester' ? 'bg-green-100 text-green-700' : user.role === 'tech_lead' ? 'bg-blue-100 text-blue-700' : 'bg-blue-100 text-blue-700'}`}>
                     {roleLabel(user.role)}
                   </span>
                   <button onClick={() => handleEdit(user)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
