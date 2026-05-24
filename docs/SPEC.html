@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>項目管理系統 - 開發計劃書</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 60px 40px; border-radius: 16px; margin-bottom: 40px; }
+        .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
+        .header p { font-size: 1.2rem; opacity: 0.9; }
+        .header .badge { display: inline-block; background: rgba(255,255,255,0.2); padding: 6px 16px; border-radius: 20px; font-size: 0.9rem; margin-top: 20px; }
+        .card { background: white; border-radius: 12px; padding: 30px; margin-bottom: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .card h2 { color: #667eea; font-size: 1.4rem; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #f0f0f0; }
+        .card h3 { color: #333; font-size: 1.1rem; margin: 20px 0 12px 0; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+        .stat-card { background: linear-gradient(135deg, #667eea20, #764ba220); padding: 24px; border-radius: 12px; text-align: center; }
+        .stat-card .number { font-size: 2.5rem; font-weight: 700; color: #667eea; }
+        .stat-card .label { color: #666; font-size: 0.95rem; margin-top: 8px; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; color: #555; }
+        tr:hover { background: #f8f9fa; }
+        .tag { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; }
+        .tag-admin { background: #ff4757; color: white; }
+        .tag-pm { background: #667eea; color: white; }
+        .tag-tech { background: #2ed573; color: white; }
+        .tag-dev { background: #ffa502; color: white; }
+        .tag-tester { background: #ff6b81; color: white; }
+        .phase { background: linear-gradient(135deg, #667eea10, #764ba210); border-left: 4px solid #667eea; padding: 20px 24px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+        .phase h4 { color: #667eea; margin-bottom: 12px; font-size: 1.1rem; }
+        .phase ul { margin-left: 20px; }
+        .phase li { margin: 8px 0; }
+        .check { color: #2ed573; margin-right: 8px; }
+        .arch-diagram { background: #1a1a2e; color: #eee; padding: 30px; border-radius: 12px; font-family: 'Courier New', monospace; font-size: 0.9rem; overflow-x: auto; }
+        .arch-diagram .title { color: #667eea; font-weight: bold; }
+        .arch-diagram .component { color: #2ed573; }
+        .arch-diagram .arrow { color: #ffa502; }
+        ul, ol { margin-left: 24px; }
+        li { margin: 8px 0; }
+        .highlight { background: #fff3cd; padding: 16px 20px; border-radius: 8px; border-left: 4px solid #ffc107; margin: 16px 0; }
+        code { background: #f4f4f4; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        .footer { text-align: center; color: #999; padding: 40px 0; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📋 項目管理系統 (PM System)</h1>
+            <p>公司內部使用的項目管理系統開發計劃書</p>
+            <div class="badge">🚀 預計開發周期：6-9 週</div>
+        </div>
+
+        <div class="grid" style="margin-bottom: 40px;">
+            <div class="stat-card">
+                <div class="number">5</div>
+                <div class="label">用戶角色</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">50</div>
+                <div class="label">預計用戶數</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">4</div>
+                <div class="label">開發階段</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">2</div>
+                <div class="label">報表模組</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📌 1. 項目概述</h2>
+            <table>
+                <tr><th style="width: 150px;">項目</th><th>內容</th></tr>
+                <tr><td>系統名稱</td><td>Internal PM System（內部項目管理系統）</td></tr>
+                <tr><td>用戶規模</td><td>約 50 人</td></tr>
+                <tr><td>部署環境</td><td>公司內部伺服器（Docker）</td></tr>
+                <tr><td>認證方式</td><td>Email + Password（管理員創建帳號）</td></tr>
+                <tr><td>技術架構</td><td>React + Tailwind (前端) / Elysia.js + Bun (後端) / PostgreSQL</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>👥 2. 用戶角色</h2>
+            <table>
+                <tr><th>角色</th><th>主要職責</th></tr>
+                <tr><td><span class="tag tag-pm">項目經理/產品經理</span></td><td>管理項目及需求</td></tr>
+                <tr><td><span class="tag tag-tech">開發技術主管</span></td><td>根據需求拆解任務，安排開發人員</td></tr>
+                <tr><td><span class="tag tag-dev">開發人員</span></td><td>處理任務，更新狀態，登記工作時數</td></tr>
+                <tr><td><span class="tag tag-tester">測試人員</span></td><td>提交缺陷，修復後驗證，登記工作時數</td></tr>
+                <tr><td><span class="tag tag-admin">管理員</span></td><td>帳號管理、權限管理、報表查看</td></tr>
+            </table>
+            <div class="highlight">
+                <strong>💡 重要特性：</strong>
+                <ul style="margin-top: 8px;">
+                    <li>一個用戶可以有多個角色，不同項目中角色可能不同</li>
+                    <li>項目經理只能看到自己負責的項目</li>
+                    <li>開發人員只能看到被指派的任務</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>⚙️ 3. 核心功能模組</h2>
+            
+            <h3>3.1 項目管理</h3>
+            <ul>
+                <li>創建/編輯/刪除項目</li>
+                <li>設置項目成員及角色</li>
+                <li>項目狀態追蹤（active / completed / archived）</li>
+            </ul>
+
+            <h3>3.2 需求管理</h3>
+            <ul>
+                <li>創建/編輯/刪除需求（可附帶附件）</li>
+                <li>需求狀態：pending / in_progress / completed</li>
+            </ul>
+
+            <h3>3.3 任務管理</h3>
+            <ul>
+                <li>技術主管根據需求拆解任務</li>
+                <li><strong>支援跨需求任務</strong>（一任務可關聯多個需求）</li>
+                <li>任務可附帶附件</li>
+                <li>指派給開發人員</li>
+                <li>狀態：pending / in_progress / testing / completed</li>
+            </ul>
+
+            <h3>3.4 缺陷管理</h3>
+            <ul>
+                <li>測試人員提交缺陷，關聯到具體任務</li>
+                <li>缺陷狀態：open / in_progress / resolved / closed</li>
+                <li>嚴重程度：low / medium / high / critical</li>
+            </ul>
+
+            <h3>3.5 工作時數</h3>
+            <ul>
+                <li>每次任務完成後或每天登記（可補填過往記錄）</li>
+                <li>精確到小時，保留兩位小數（如：0.25 = 15分鐘）</li>
+                <li>可關聯任務或缺陷</li>
+            </ul>
+
+            <h3>3.6 報表功能</h3>
+            <table>
+                <tr><th>報表類型</th><th>使用者</th><th>內容</th></tr>
+                <tr><td>項目成本報表</td><td>管理員、PM</td><td>各人員工作時數統計</td></tr>
+                <tr><td>項目進度報表</td><td>管理員、PM</td><td>需求/任務完成進度百分比</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>🔐 4. 權限矩陣</h2>
+            <table>
+                <tr><th>功能</th><th>Admin</th><th>PM</th><th>Tech Lead</th><th>Developer</th><th>Tester</th></tr>
+                <tr><td>管理用戶</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>創建項目</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>刪除項目</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>創建需求</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+                <tr><td>創建任務</td><td>✅</td><td>❌</td><td>✅</td><td>❌</td><td>❌</td></tr>
+                <tr><td>指派任務</td><td>✅</td><td>❌</td><td>✅</td><td>❌</td><td>❌</td></tr>
+                <tr><td>更新任務</td><td>✅</td><td>❌</td><td>✅</td><td>✅</td><td>❌</td></tr>
+                <tr><td>提交缺陷</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td></tr>
+                <tr><td>修復缺陷</td><td>✅</td><td>❌</td><td>✅</td><td>✅</td><td>❌</td></tr>
+                <tr><td>登記時數</td><td>✅</td><td>❌</td><td>✅</td><td>✅</td><td>✅</td></tr>
+                <tr><td>查看報表</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>🏗️ 5. 系統架構</h2>
+            <div class="arch-diagram">
+<pre>
+                        ┌─────────────────┐
+                        │   用戶瀏覽器     │
+                        │   (Chrome/Safari)│
+                        └────────┬────────┘
+                                 │ HTTPS (self-signed)
+                        ┌────────▼────────┐
+                        │      Nginx       │
+                        │  (Reverse Proxy) │
+                        │   Port 443       │
+                        └────────┬────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                  │
+     ┌────────▼────────┐ ┌──────▼────────┐ ┌──────▼────────┐
+     │   React SPA     │ │  Elysia API   │ │  PostgreSQL   │
+     │   Port 3000     │ │  Port 4000    │ │   Port 5432   │
+     │                 │ │              │ │               │
+     │ - 登入/登出     │ │ - REST API   │ │ - 用戶        │
+     │ - 項目管理      │ │ - JWT 認證   │ │ - 項目        │
+     │ - 需求/任務     │ │ - 業務邏輯   │ │ - 需求        │
+     │ - 缺陷管理      │ │ - 權限控制   │ │ - 任務        │
+     │ - 工作時數      │ │              │ │ - 缺陷        │
+     │ - 報表          │ │              │ │ - 工作時數    │
+     └─────────────────┘ └──────────────┘ └───────────────┘
+</pre>
+            </div>
+
+            <h3 style="margin-top: 24px;">技術棧</h3>
+            <table>
+                <tr><th style="width: 120px;">層面</th><th>技術</th></tr>
+                <tr><td>前端</td><td>React 18 + Tailwind CSS + Vite + React Router v7</td></tr>
+                <tr><td>後端</td><td>Elysia.js (Bun runtime) + Node.js</td></tr>
+                <tr><td>數據庫</td><td>PostgreSQL 15 + Prisma ORM</td></tr>
+                <tr><td>認證</td><td>JWT Access Token (15min) + Refresh Token (7天)</td></tr>
+                <tr><td>容器</td><td>Docker + Docker Compose</td></tr>
+                <tr><td>報表</td><td>Recharts</td></tr>
+                <tr><td>文件存儲</td><td>本地磁盤（Docker Volume），最大 50MB/檔</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>📊 6. 數據模型</h2>
+            <p style="margin-bottom: 16px;"><strong>核心實體：</strong></p>
+            <ul>
+                <li><strong>User</strong> - 用戶（email, name, passwordHash）</li>
+                <li><strong>Project</strong> - 項目（name, description, status）</li>
+                <li><strong>ProjectMember</strong> - 項目成員（project_id, user_id, role）- 每項目獨立角色</li>
+                <li><strong>Requirement</strong> - 需求（project_id, title, status）</li>
+                <li><strong>Task</strong> - 任務（title, assignee_id, status, estimatedHours）</li>
+                <li><strong>TaskRequirement</strong> - 任務-需求關聯（多對多，支援跨需求）</li>
+                <li><strong>Bug</strong> - 缺陷（task_id, title, status, severity）</li>
+                <li><strong>WorkLog</strong> - 工作時數（user_id, task_id/bug_id, hours, workDate）</li>
+                <li><strong>Attachment</strong> - 附件（entity_type, entity_id, filename, storedPath）</li>
+                <li><strong>RefreshToken</strong> - Refresh Token（token, userId, expiresAt）</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>🚀 7. 開發階段</h2>
+            
+            <div class="phase">
+                <h4>Phase 1：基礎架構（1-2 週）</h4>
+                <ul>
+                    <li><span class="check">✅</span>項目初始化（React + Elysia.js + PostgreSQL）</li>
+                    <li><span class="check">✅</span>Docker Compose 編排</li>
+                    <li><span class="check">✅</span>數據庫遷移（Migrations）</li>
+                    <li><span class="check">✅</span>用戶認證（JWT）</li>
+                    <li><span class="check">✅</span>用戶管理（Admin）</li>
+                </ul>
+                <p style="margin-top: 12px; color: #666;"><strong>交付：</strong>可登入的系統骨架</p>
+            </div>
+
+            <div class="phase">
+                <h4>Phase 2：核心功能（2-3 週）</h4>
+                <ul>
+                    <li><span class="check">✅</span>項目 CRUD</li>
+                    <li><span class="check">✅</span>項目成員管理（按項目角色）</li>
+                    <li><span class="check">✅</span>需求 CRUD（含附件上傳）</li>
+                    <li><span class="check">✅</span>任務 CRUD（含跨需求關聯）</li>
+                    <li><span class="check">✅</span>缺陷 CRUD</li>
+                </ul>
+                <p style="margin-top: 12px; color: #666;"><strong>交付：</strong>項目/需求/任務模組</p>
+            </div>
+
+            <div class="phase">
+                <h4>Phase 3：工作流程（2 週）</h4>
+                <ul>
+                    <li><span class="check">✅</span>工作時數登記（支持補填）</li>
+                    <li><span class="check">✅</span>任務狀態流轉</li>
+                    <li><span class="check">✅</span>缺陷狀態流轉</li>
+                    <li><span class="check">✅</span>權限控制（各角色）</li>
+                </ul>
+                <p style="margin-top: 12px; color: #666;"><strong>交付：</strong>缺陷+時數+權限</p>
+            </div>
+
+            <div class="phase">
+                <h4>Phase 4：報表與優化（1-2 週）</h4>
+                <ul>
+                    <li><span class="check">✅</span>項目成本報表</li>
+                    <li><span class="check">✅</span>項目進度報表</li>
+                    <li><span class="check">✅</span>RWD 響應式優化</li>
+                    <li><span class="check">✅</span>測試與部署</li>
+                </ul>
+                <p style="margin-top: 12px; color: #666;"><strong>交付：</strong>完整 MVP</p>
+            </div>
+
+            <div class="highlight" style="margin-top: 24px;">
+                <strong>⏱️ 總計：6-9 週</strong>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🌐 8. 部署架構</h2>
+            <ul>
+                <li><strong>Nginx</strong> - HTTPS reverse proxy（self-signed 測試） + SPA fallback</li>
+                <li><strong>Frontend</strong> - React SPA，Port 3000</li>
+                <li><strong>Backend</strong> - Elysia.js API，Port 4000</li>
+                <li><strong>PostgreSQL</strong> - Port 5432，數據持久化</li>
+                <li><strong>Uploads</strong> - 文件存儲，Docker volume 持久化</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>📁 9. 項目結構</h2>
+            <pre style="background: #f8f9fa; padding: 20px; border-radius: 8px; overflow-x: auto;">
+pm-system/
+├── docs/                    # 項目文檔
+│   ├── SPEC.md             # 需求規格
+│   ├── ARCHITECTURE.md     # 架構文檔
+│   └── API.md              # API 文檔
+├── frontend/               # React 前端
+│   ├── src/
+│   │   ├── components/     # 可复用組件
+│   │   ├── pages/          # 頁面
+│   │   ├── hooks/          # 自定義 Hooks
+│   │   ├── context/        # React Context
+│   │   ├── types/          # TypeScript 類型
+│   │   └── utils/          # 工具函數
+│   ├── package.json
+│   └── Dockerfile
+├── backend/                # Elysia.js 後端
+│   ├── src/
+│   │   ├── routes/         # API 路由
+│   │   ├── middleware/     # 中間件
+│   │   ├── services/       # 業務邏輯
+│   │   └── utils/          # 工具函數
+│   ├── prisma/
+│   │   └── schema.prisma   # 數據庫 schema
+│   ├── package.json
+│   └── Dockerfile
+├── infra/                  # 基礎設施
+│   ├── docker-compose.yml
+│   └── nginx.conf
+└── docker/                 # Docker 配置
+    └── certs/              # SSL 憑證
+            </pre>
+        </div>
+
+        <div class="footer">
+            <p>📅 文檔生成時間：2025年5月21日</p>
+            <p>🚀 項目管理系統開發計劃書</p>
+        </div>
+    </div>
+</body>
+</html>

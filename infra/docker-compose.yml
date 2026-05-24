@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../infra/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../docker/certs:/etc/nginx/certs:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - pm-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../frontend/Dockerfile
+    environment:
+      - VITE_API_URL=/api
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - pm-network
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../backend/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://postgres:pm_password@postgres:5432/pm_system
+      - JWT_SECRET=pm-system-jwt-secret-key-change-in-production-2025
+      - REFRESH_TOKEN_SECRET=pm-system-refresh-token-secret-key-change-in-production-2025
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      - postgres
+    networks:
+      - pm-network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=pm_password
+      - POSTGRES_DB=pm_system
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pm-network
+
+volumes:
+  postgres_data:
+  uploads:
+
+networks:
+  pm-network:
+    driver: bridge

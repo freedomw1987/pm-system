@@ -1,0 +1,233 @@
+// This is your Prisma schema file,
+// learn more about it in our docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  role         String   @default("developer") // admin, pm, tech_lead, developer, tester
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  ownedProjects       Project[]       @relation("ProjectOwner")
+  projectMemberships  ProjectMember[]
+  createdRequirements Requirement[]
+  assignedTasks       Task[]          @relation("TaskAssignee")
+  reportedBugs        Bug[]           @relation("BugReporter")
+  assignedBugs        Bug[]           @relation("BugAssignee")
+  workLogs            WorkLog[]
+  uploadedAttachments Attachment[]
+  refreshTokens       RefreshToken[]
+  createdWikiPages    WikiPage[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions String[]
+  isBuiltIn   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Permission {
+  id       String @id @default(cuid())
+  key      String @unique
+  name     String
+  category String
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  status      String    @default("active") // active, completed, archived
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  owner        User            @relation("ProjectOwner", fields: [createdById], references: [id])
+  members      ProjectMember[]
+  requirements Requirement[]
+  tasks        Task[]
+  bugs         Bug[]
+  wikiPages    WikiPage[]
+  attachments  Attachment[]
+
+  @@map("projects")
+}
+
+model WikiPage {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  title     String
+  content   String   @db.Text
+  order     Int      @default(0)
+  createdById String @map("created_by_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@map("wiki_pages")
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  userId    String   @map("user_id")
+  role      String // pm, tech_lead, developer, tester
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model Requirement {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  title       String
+  description String?
+  status      String   @default("pending") // pending, in_progress, completed
+  priority    String   @default("medium") // low, medium, high
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User              @relation(fields: [createdById], references: [id])
+  tasks     TaskRequirement[]
+  bugs      Bug[]
+
+  @@map("requirements")
+}
+
+model Task {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  title          String
+  description    String?
+  assigneeId     String?  @map("assignee_id")
+  status         String   @default("pending") // pending, in_progress, completed
+  estimatedHours Decimal? @map("estimated_hours")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee     User?             @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  requirements TaskRequirement[]
+  bugs         Bug[]
+  workLogs     WorkLog[]
+
+  @@map("tasks")
+}
+
+model TaskRequirement {
+  taskId        String @map("task_id")
+  requirementId String @map("requirement_id")
+
+  task        Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, requirementId])
+  @@map("task_requirements")
+}
+
+model Bug {
+  id            String   @id @default(uuid())
+  projectId     String   @map("project_id")
+  requirementId String?  @map("requirement_id")
+  taskId        String?  @map("task_id")
+  assigneeId    String?  @map("assignee_id")
+  title         String
+  description   String?
+  reporterId    String   @map("reporter_id")
+  status        String   @default("open") // open, in_progress, resolved, verified
+  severity      String   @default("medium") // low, medium, high, critical
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requirement Requirement? @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+  task        Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  reporter    User         @relation("BugReporter", fields: [reporterId], references: [id])
+  assignee    User?        @relation("BugAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  workLogs    WorkLog[]
+
+  @@map("bugs")
+}
+
+model WorkLog {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  taskId      String?  @map("task_id")
+  bugId       String?  @map("bug_id")
+  hours       Decimal  @db.Decimal(4, 2)
+  date        DateTime @map("work_date")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  bug  Bug?  @relation(fields: [bugId], references: [id], onDelete: Cascade)
+
+  @@map("work_logs")
+}
+
+model Attachment {
+  id           String   @id @default(uuid())
+  entityType   String   @map("entity_type") // 'requirement' | 'task'
+  entityId     String   @map("entity_id")
+  filename     String
+  storedPath   String   @map("stored_path")
+  mimeType     String   @map("mime_type")
+  fileSize     Int      @map("file_size")
+  uploadedById String   @map("uploaded_by_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+  project     Project? @relation(fields: [projectId], references: [id])
+  projectId   String?  @map("project_id")
+
+  @@map("attachments")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}

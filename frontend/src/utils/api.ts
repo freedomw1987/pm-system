@@ -1,0 +1,183 @@
+import axios from 'axios'
+
+const API_URL = import.meta.env.VITE_API_URL || '/api'
+
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+// Add auth token to requests
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('accessToken')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Handle auth errors
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      // Try to refresh token
+      const refreshToken = localStorage.getItem('refreshToken')
+      if (refreshToken) {
+        try {
+          const response = await axios.post(`${API_URL}/auth/refresh`, { refreshToken })
+          localStorage.setItem('accessToken', response.data.accessToken)
+          localStorage.setItem('refreshToken', response.data.refreshToken)
+          // Retry original request
+          error.config.headers.Authorization = `Bearer ${response.data.accessToken}`
+          return api(error.config)
+        } catch {
+          // Refresh failed, logout
+          localStorage.removeItem('accessToken')
+          localStorage.removeItem('refreshToken')
+          window.location.href = '/login'
+        }
+      } else {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+export default api
+
+// Auth API (public, outside /api prefix) - use axios directly
+export const authApi = {
+  login: (email: string, password: string) =>
+    axios.post('/auth/login', { email, password }),
+  logout: () => axios.post('/auth/logout'),
+  refresh: (refreshToken: string) =>
+    axios.post('/auth/refresh', { refreshToken }),
+}
+
+// User API
+export const userApi = {
+  list: () => api.get('/users'),
+  listSimple: () => api.get('/users/list'),
+  create: (data: { email: string; name: string; password: string; role?: string }) =>
+    api.post('/users', data),
+  get: (id: string) => api.get(`/users/${id}`),
+  update: (id: string, data: { name?: string; email?: string; password?: string; role?: string }) =>
+    api.put(`/users/${id}`, data),
+  delete: (id: string) => api.delete(`/users/${id}`),
+}
+
+// Role and Permission API
+export const roleApi = {
+  list: () => api.get('/roles'),
+  create: (data: { name: string; description?: string; permissions: string[] }) =>
+    api.post('/roles', data),
+  update: (id: string, data: { name?: string; description?: string | null; permissions?: string[] }) =>
+    api.put(`/roles/${id}`, data),
+  delete: (id: string) => api.delete(`/roles/${id}`),
+  permissions: () => api.get('/permissions'),
+}
+
+// Project API
+export const projectApi = {
+  list: () => api.get('/projects'),
+  create: (data: { name: string; description?: string }) =>
+    api.post('/projects', data),
+  get: (id: string) => api.get(`/projects/${id}`),
+  update: (id: string, data: { name?: string; description?: string; status?: string }) =>
+    api.put(`/projects/${id}`, data),
+  delete: (id: string) => api.delete(`/projects/${id}`),
+  getMembers: (id: string) => api.get(`/projects/${id}/members`),
+  addMember: (id: string, data: { userId: string; role: string }) =>
+    api.post(`/projects/${id}/members`, data),
+  removeMember: (memberId: string) =>
+    api.delete(`/projects/members/${memberId}`),
+}
+
+// Requirement API
+export const requirementApi = {
+  list: (projectId: string) => api.get(`/projects/${projectId}/requirements`),
+  listAll: () => api.get('/requirements'),
+  get: (id: string) => api.get(`/requirements/${id}`),
+  create: (projectId: string, data: { title: string; description?: string; priority?: string }) =>
+    api.post(`/projects/${projectId}/requirements`, data),
+  update: (id: string, data: { title?: string; description?: string; status?: string; priority?: string }) =>
+    api.put(`/requirements/${id}`, data),
+  delete: (id: string) => api.delete(`/requirements/${id}`),
+}
+
+// Task API
+export const taskApi = {
+  list: (params?: { projectId?: string; status?: string; assigneeId?: string; requirementId?: string }) =>
+    api.get('/tasks', { params }),
+  create: (data: { title: string; description?: string; assigneeId?: string; requirementIds?: string[]; estimatedHours?: number; projectId?: string }) =>
+    api.post('/tasks', data),
+  get: (id: string) => api.get(`/tasks/${id}`),
+  update: (id: string, data: { title?: string; description?: string; status?: string; assigneeId?: string; estimatedHours?: number }) =>
+    api.put(`/tasks/${id}`, data),
+  updateStatus: (id: string, status: string) =>
+    api.put(`/tasks/${id}`, { status }),
+  delete: (id: string) => api.delete(`/tasks/${id}`),
+}
+
+// Bug API
+export const bugApi = {
+  list: (params?: { taskId?: string; status?: string; reporterId?: string; requirementId?: string; projectId?: string }) =>
+    api.get('/bugs', { params }),
+  create: (data: { title: string; description?: string; taskId?: string; severity?: string; requirementId?: string; projectId?: string }) =>
+    api.post('/bugs', data),
+  update: (id: string, data: { status?: string; description?: string }) =>
+    api.put(`/bugs/${id}`, data),
+  updateStatus: (id: string, status: string) =>
+    api.put(`/bugs/${id}`, { status }),
+  delete: (id: string) => api.delete(`/bugs/${id}`),
+}
+
+// WorkLog API
+export const workLogApi = {
+  list: (params?: { userId?: string; taskId?: string; bugId?: string; projectId?: string; startDate?: string; endDate?: string }) =>
+    api.get('/worklogs', { params }),
+  create: (data: { taskId?: string; bugId?: string; hours: number; workDate: string; note?: string }) =>
+    api.post('/worklogs', data),
+  update: (id: string, data: { hours?: number; workDate?: string; note?: string }) =>
+    api.put(`/worklogs/${id}`, data),
+  delete: (id: string) => api.delete(`/worklogs/${id}`),
+}
+
+// Report API
+export const reportApi = {
+  cost: (projectId: string) => api.get('/reports/cost', { params: { projectId } }),
+  progress: (projectId: string) => api.get('/reports/progress', { params: { projectId } }),
+}
+
+// Attachment API
+export const attachmentApi = {
+  upload: (file: File, entityType: 'requirement' | 'task' | 'project' | 'wiki', entityId: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('entityType', entityType)
+    formData.append('entityId', entityId)
+    return api.post('/attachments/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  list: (entityType: string, entityId: string) =>
+    api.get(`/attachments/entity/${entityType}/${entityId}`),
+  listByProject: (projectId: string) =>
+    api.get(`/attachments/project/${projectId}`),
+  delete: (id: string) => api.delete(`/attachments/${id}`),
+}
+
+// Wiki API
+export const wikiApi = {
+  list: (projectId: string) => api.get('/wikis', { params: { projectId } }),
+  get: (id: string) => api.get(`/wikis/${id}`),
+  create: (data: { projectId: string; title: string; content?: string }) =>
+    api.post('/wikis', data),
+  update: (id: string, data: { title?: string; content?: string; order?: number }) =>
+    api.put(`/wikis/${id}`, data),
+  delete: (id: string) => api.delete(`/wikis/${id}`),
+}
