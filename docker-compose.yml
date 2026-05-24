@@ -1,13 +1,23 @@
+# ============================================================
+# PM System — 本地開發環境
+# 使用方式：docker compose up -d
+# ============================================================
+version: '3.8'
+
 services:
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "8080:80"
     depends_on:
       - backend
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "4001:4000"
     depends_on:
@@ -15,7 +25,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://pmuser:pmpassword@db:5432/pmdb
-      JWT_SECRET: your-secret-key
+      JWT_SECRET: dev-secret-key
       FRONTEND_URL: http://localhost
     command: sh -c "npx prisma db push && npx prisma db seed && bun src/index.ts"
 

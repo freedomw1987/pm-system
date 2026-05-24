@@ -27,16 +27,6 @@ function getUserPermissions(user: any): string[] {
 }
 
 /**
- * Check if user has a specific role name (for backward compat with hardcoded role checks).
- * Admin always passes.
- */
-function hasRole(user: any, allowedRoles: string[]): boolean {
-  if (!user) return false
-  if (user.role === 'admin') return true
-  return allowedRoles.includes(user.role)
-}
-
-/**
  * Check if user has at least one of the required permissions.
  * If permissions array is empty, always show (no permission required).
  */

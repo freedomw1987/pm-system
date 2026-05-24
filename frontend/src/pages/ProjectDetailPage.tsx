@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip } from 'lucide-react'
-import { projectApi, requirementApi, userApi } from '../utils/api'
-import type { Project, Requirement, User, ProjectMember } from '../types'
+import { projectApi, requirementApi, userApi, roleApi } from '../utils/api'
+import type { Project, Requirement, User, ProjectMember, Role } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
 import WikiTab from '../components/WikiTab'
@@ -20,8 +20,9 @@ export default function ProjectDetailPage() {
   const [showAddMember, setShowAddMember] = useState(false)
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
-  const [selectedRole, setSelectedRole] = useState('developer')
+  const [selectedRole, setSelectedRole] = useState('')
   const [isAddingMember, setIsAddingMember] = useState(false)
+  const [availableRoles, setAvailableRoles] = useState<Role[]>([])
 
   // Edit member role
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
@@ -43,6 +44,7 @@ export default function ProjectDetailPage() {
   const [isEditingReq, setIsEditingReq] = useState(false)
 
   useEffect(() => { if (id) loadProject() }, [id])
+  useEffect(() => { roleApi.list().then(r => setAvailableRoles(r.data.roles || [])) }, [])
 
   const loadProject = async () => {
     try {
@@ -66,8 +68,11 @@ export default function ProjectDetailPage() {
   }
 
   const openAddMember = () => {
-    setSelectedUserId(''); setSelectedRole('developer'); setIsAddingMember(false)
-    loadAllUsers().then(() => setShowAddMember(true))
+    setSelectedUserId(''); setSelectedRole(''); setIsAddingMember(false)
+    Promise.all([loadAllUsers(), roleApi.list()]).then(([_, rolesRes]) => {
+      setAvailableRoles(rolesRes.data.roles || [])
+      setShowAddMember(true)
+    })
   }
 
   const handleAddMember = async (e: React.FormEvent) => {
@@ -319,10 +324,9 @@ export default function ProjectDetailPage() {
                     {editingMemberId === member.id ? (
                       <>
                         <select value={editingRole} onChange={(e) => setEditingRole(e.target.value)} className="input-field py-1 text-sm w-32">
-                          <option value="pm">項目經理</option>
-                          <option value="tech_lead">技術主管</option>
-                          <option value="developer">開發</option>
-                          <option value="tester">測試</option>
+                          {availableRoles.map(r => (
+                            <option key={r.id} value={r.name}>{r.name}</option>
+                          ))}
                         </select>
                         <button onClick={() => handleUpdateMemberRole(member)} className="btn-primary py-1 px-3 text-sm">儲存</button>
                         <button onClick={() => setEditingMemberId(null)} className="btn-secondary py-1 px-3 text-sm">取消</button>
@@ -381,11 +385,11 @@ export default function ProjectDetailPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">項目角色 *</label>
-                <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="input-field">
-                  <option value="developer">開發人員</option>
-                  <option value="tester">測試人員</option>
-                  <option value="tech_lead">技術主管</option>
-                  <option value="pm">項目經理</option>
+                <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="input-field" required>
+                  <option value="">-- 選擇角色 --</option>
+                  {availableRoles.map(r => (
+                    <option key={r.id} value={r.name}>{r.name}</option>
+                  ))}
                 </select>
               </div>
               <div className="flex gap-3 justify-end">

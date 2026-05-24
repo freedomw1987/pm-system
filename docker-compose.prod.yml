@@ -1,0 +1,88 @@
+# ============================================================
+# PM System — 生產環境
+# 使用方式：docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+version: '3.8'
+
+services:
+  # ── Nginx：SSL 終點 + 反向代理 ───────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt/live/pm.david-developer.com:/etc/letsencrypt/live/pm.david-developer.com:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - pm-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Frontend：React SPA + nginx ──────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: always
+    networks:
+      - pm-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Backend：Bun + Elysia API ───────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://pmuser:pmpassword@db:5432/pmdb
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}
+      - UPLOAD_DIR=/app/uploads
+      - NODE_ENV=production
+      - PORT=4000
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pm-network
+
+  # ── Postgres Database ────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=pmuser
+      - POSTGRES_PASSWORD=pmpassword
+      - POSTGRES_DB=pmdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmuser -d pmdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  uploads:
+
+networks:
+  pm-network:
+    driver: bridge
