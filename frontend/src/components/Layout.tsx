@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, Settings, BookOpen } from 'lucide-react'
+import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, Settings, Bot } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems: Array<{ path: string; icon: any; label: string; permissions: string[]; adminOnly?: boolean }> = [
@@ -12,7 +12,8 @@ const navItems: Array<{ path: string; icon: any; label: string; permissions: str
   { path: '/my-bugs', icon: Bug, label: '我的缺陷', permissions: ['bugs.view'] },
   { path: '/work-logs', icon: Clock, label: '工作時數', permissions: ['worklogs.view'] },
   { path: '/reports', icon: BarChart3, label: '報表', permissions: ['reports.view'] },
-  { path: '/wiki', icon: BookOpen, label: '知識庫', permissions: [] },
+  
+  { path: '/chat', icon: Bot, label: 'AI 助手', permissions: [] },
   { path: '/users', icon: Users, label: '用戶管理', permissions: ['users.view'] },
   { path: '/roles', icon: ShieldCheck, label: '角色權限', permissions: ['roles.view'] },
   { path: '/settings', icon: Settings, label: 'AI 設定', permissions: [], adminOnly: true },
