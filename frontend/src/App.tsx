@@ -14,6 +14,8 @@ import WorkLogsPage from './pages/WorkLogsPage'
 import ReportsPage from './pages/ReportsPage'
 import UsersPage from './pages/UsersPage'
 import RolesPage from './pages/RolesPage'
+import SettingsPage from './pages/SettingsPage'
+import WikiPage from './pages/WikiPage'
 
 // Layout
 import Layout from './components/Layout'
@@ -56,6 +58,9 @@ function App() {
             <Route path="reports" element={<ReportsPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="roles" element={<RolesPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="wiki" element={<WikiPage />} />
+            <Route path="wiki/:projectId" element={<WikiPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

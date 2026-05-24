@@ -13,6 +13,7 @@ import { reportRoutes } from './routes/reports'
 import { attachmentRoutes } from './routes/attachments'
 import { roleRoutes } from './routes/roles'
 import wikiRoutes from './routes/wikis'
+import { llmConfigRoutes } from './routes/llm-config'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
@@ -102,6 +103,7 @@ const app = new Elysia()
     .use(attachmentRoutes)
     .use(roleRoutes)
     .use(wikiRoutes)
+    .use(llmConfigRoutes)
   )
   .listen(4000)
 
