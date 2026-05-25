@@ -93,6 +93,8 @@ export const projectApi = {
   getMembers: (id: string) => api.get(`/projects/${id}/members`),
   addMember: (id: string, data: { userId: string; role: string }) =>
     api.post(`/projects/${id}/members`, data),
+  updateMemberRole: (memberId: string, role: string) =>
+    api.patch(`/projects/members/${memberId}`, { role }),
   removeMember: (memberId: string) =>
     api.delete(`/projects/members/${memberId}`),
 }
@@ -180,4 +182,12 @@ export const wikiApi = {
   update: (id: string, data: { title?: string; content?: string; order?: number }) =>
     api.put(`/wikis/${id}`, data),
   delete: (id: string) => api.delete(`/wikis/${id}`),
+}
+
+// Document import API (Word/Excel/PDF → MD via LLM)
+export const documentApi = {
+  parse: (formData: FormData) =>
+    api.post('/documents/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 }

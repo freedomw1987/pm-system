@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Save, X, Eye, Edit2, Upload } from 'lucide-react'
-import { attachmentApi } from '../utils/api'
+import { Save, X, Eye, Edit2, Upload, FileUp } from 'lucide-react'
+import { attachmentApi, documentApi } from '../utils/api'
 
 interface WikiPage {
   id: string
@@ -25,7 +25,9 @@ export default function WikiEditor({ page, projectId, onSave, onCancel }: WikiEd
   const [content, setContent] = useState(page?.content || '')
   const [isSaving, setIsSaving] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isParsing, setIsParsing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
 
   const handleSave = async () => {
     if (!title.trim()) return
@@ -62,6 +64,39 @@ export default function WikiEditor({ page, projectId, onSave, onCancel }: WikiEd
     }
   }
 
+  const handleDocImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsParsing(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('projectId', projectId)
+
+      const res = await documentApi.parse(formData)
+      const { wikiPage, analysis } = res.data
+
+      if (wikiPage) {
+        setTitle(wikiPage.title)
+        setContent(wikiPage.content)
+      } else if (analysis?.wikiContent) {
+        setTitle(analysis.title || title)
+        setContent(analysis.wikiContent)
+      } else if (analysis?.content) {
+        setTitle(analysis.title || title)
+        setContent(analysis.content)
+      }
+    } catch (err: any) {
+      console.error(err)
+      const msg = err?.response?.data?.error?.message || '文件解析失敗，請確認 AI 設定已配置'
+      alert(msg)
+    } finally {
+      setIsParsing(false)
+      if (docInputRef.current) docInputRef.current.value = ''
+    }
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -93,6 +128,24 @@ export default function WikiEditor({ page, projectId, onSave, onCancel }: WikiEd
         >
           <Upload size={14} />
           {isUploading ? '上傳中...' : '上傳圖片/附件'}
+        </label>
+
+        <div className="w-px h-4 bg-gray-300 mx-1" />
+
+        <input
+          ref={docInputRef}
+          type="file"
+          className="hidden"
+          id="doc-import"
+          accept=".docx,.md,.xlsx,.pdf"
+          onChange={handleDocImport}
+        />
+        <label
+          htmlFor="doc-import"
+          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-primary-600 cursor-pointer transition-colors"
+        >
+          <FileUp size={14} />
+          {isParsing ? '解析中...' : '導入 Word/Excel/PDF'}
         </label>
         <a
           href="https://www.markdownguide.org/cheat-sheet/"

@@ -121,5 +121,43 @@ const authRoutes = new Elysia({ prefix: '/auth' })
       refreshToken: t.String()
     })
   })
+  .post('/change-password', async ({ body, set, user }) => {
+    if (!user) {
+      set.status = 401
+      return { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }
+    }
+
+    const { currentPassword, newPassword } = body as { currentPassword: string; newPassword: string }
+    if (!newPassword || newPassword.length < 6) {
+      set.status = 400
+      return { error: { code: 'VALIDATION_ERROR', message: '新密碼至少需要 6 個字元' } }
+    }
+
+    const { prisma } = await import('../utils/prisma')
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id } })
+    if (!dbUser) {
+      set.status = 404
+      return { error: { code: 'NOT_FOUND', message: 'User not found' } }
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, dbUser.passwordHash)
+    if (!validPassword) {
+      set.status = 400
+      return { error: { code: 'INVALID_PASSWORD', message: '當前密碼不正確' } }
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash }
+    })
+
+    return { success: true, message: '密碼已更新' }
+  }, {
+    body: t.Object({
+      currentPassword: t.String(),
+      newPassword: t.String({ minLength: 6 })
+    })
+  })
 
 export { authRoutes }

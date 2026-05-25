@@ -103,8 +103,7 @@ export default function ProjectDetailPage() {
 
   const handleUpdateMemberRole = async (member: ProjectMember) => {
     try {
-      await projectApi.removeMember(member.id)
-      await projectApi.addMember(id!, { userId: member.user.id, role: editingRole })
+      await projectApi.updateMemberRole(member.id, editingRole)
       setEditingMemberId(null)
       loadProject()
     } catch (err) {

@@ -15,6 +15,8 @@ import ReportsPage from './pages/ReportsPage'
 import UsersPage from './pages/UsersPage'
 import RolesPage from './pages/RolesPage'
 import SettingsPage from './pages/SettingsPage'
+import ChatPage from './pages/ChatPage'
+import ProfilePage from './pages/ProfilePage'
 import WikiPage from './pages/WikiPage'
 
 // Layout
@@ -59,6 +61,8 @@ function App() {
             <Route path="users" element={<UsersPage />} />
             <Route path="roles" element={<RolesPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="profile" element={<ProfilePage />} />
             <Route path="wiki" element={<WikiPage />} />
             <Route path="wiki/:projectId" element={<WikiPage />} />
           </Route>

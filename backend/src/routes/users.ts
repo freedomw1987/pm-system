@@ -69,8 +69,10 @@ const userRoutes = new Elysia({ prefix: '/users' })
       return { error: { code: 'VALIDATION_ERROR', message: 'Email already exists' } }
     }
 
-    // Validate role if provided (must exist in Role table)
-    if (role) {
+    // Validate role if provided — only custom roles need to exist in Role table
+    // (built-in roles like admin/pm/tech_lead/developer/tester/visitor are hardcoded strings)
+    const BUILT_IN_ROLES = ['admin', 'pm', 'tech_lead', 'developer', 'tester', 'visitor']
+    if (role && !BUILT_IN_ROLES.includes(role)) {
       const roleRecord = await prisma.role.findUnique({ where: { name: role } })
       if (!roleRecord) {
         set.status = 400
@@ -131,8 +133,10 @@ const userRoutes = new Elysia({ prefix: '/users' })
 
     const { prisma } = await import('../utils/prisma')
 
-    // Validate role if provided (must exist in Role table)
-    if (role) {
+    // Validate role if provided — only custom roles need to exist in Role table
+    // (built-in roles like admin/pm/tech_lead/developer/tester/visitor are hardcoded strings)
+    const BUILT_IN_ROLES = ['admin', 'pm', 'tech_lead', 'developer', 'tester', 'visitor']
+    if (role && !BUILT_IN_ROLES.includes(role)) {
       const roleRecord = await prisma.role.findUnique({ where: { name: role } })
       if (!roleRecord) {
         set.status = 400

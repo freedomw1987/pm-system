@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, Settings, Bot } from 'lucide-react'
+import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, Settings, Bot } from 'lucide-react'
 import clsx from 'clsx'
 
-const navItems: Array<{ path: string; icon: any; label: string; permissions: string[]; adminOnly?: boolean }> = [
+type NavItem = { path: string; icon: any; label: string; permissions: string[]; adminOnly?: boolean }
+
+const navItems: NavItem[] = [
   { path: '/', icon: LayoutDashboard, label: '儀表板', permissions: [] },
   { path: '/projects', icon: FolderKanban, label: '項目', permissions: ['projects.view', 'projects.create'] },
   { path: '/my-requirements', icon: FileText, label: '我的需求', permissions: ['requirements.view'] },
@@ -12,8 +14,9 @@ const navItems: Array<{ path: string; icon: any; label: string; permissions: str
   { path: '/my-bugs', icon: Bug, label: '我的缺陷', permissions: ['bugs.view'] },
   { path: '/work-logs', icon: Clock, label: '工作時數', permissions: ['worklogs.view'] },
   { path: '/reports', icon: BarChart3, label: '報表', permissions: ['reports.view'] },
-  
-  { path: '/chat', icon: Bot, label: 'AI 助手', permissions: [] },
+]
+
+const settingsNavItems: NavItem[] = [
   { path: '/users', icon: Users, label: '用戶管理', permissions: ['users.view'] },
   { path: '/roles', icon: ShieldCheck, label: '角色權限', permissions: ['roles.view'] },
   { path: '/settings', icon: Settings, label: 'AI 設定', permissions: [], adminOnly: true },
@@ -49,6 +52,11 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem('sidebar-collapsed') === 'true'
   })
+  const [settingsOpen, setSettingsOpen] = useState(() => {
+    return ['/users', '/roles', '/settings'].some(path =>
+      location.pathname === path || location.pathname.startsWith(`${path}/`)
+    )
+  })
 
   const handleCollapse = () => {
     const newVal = !collapsed
@@ -57,9 +65,18 @@ export default function Layout() {
   }
 
   const filteredNavItems = navItems.filter(item => {
-  if (item.adminOnly && user?.role !== 'admin') return false
-  return hasAnyPermission(user, item.permissions)
-})
+    if (item.adminOnly && user?.role !== 'admin') return false
+    return hasAnyPermission(user, item.permissions)
+  })
+
+  const filteredSettingsNavItems = settingsNavItems.filter(item => {
+    if (item.adminOnly && user?.role !== 'admin') return false
+    return hasAnyPermission(user, item.permissions)
+  })
+
+  const isSettingsActive = filteredSettingsNavItems.some(item =>
+    location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))
+  )
 
   return (
     <div className="min-h-screen flex">
@@ -121,11 +138,69 @@ export default function Layout() {
               </Link>
             )
           })}
+
+          {filteredSettingsNavItems.length > 0 && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(open => !open)}
+                title={collapsed ? '設定' : undefined}
+                className={clsx(
+                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
+                  isSettingsActive
+                    ? 'bg-primary-50 text-primary-600'
+                    : 'text-gray-600 hover:bg-gray-50',
+                  collapsed ? 'lg:justify-center lg:px-0' : ''
+                )}
+              >
+                <Settings size={20} className="flex-shrink-0" />
+                {!collapsed && <span className="font-medium flex-1 text-left">設定</span>}
+                {!collapsed && (
+                  settingsOpen
+                    ? <ChevronDown size={16} className="flex-shrink-0" />
+                    : <ChevronRight size={16} className="flex-shrink-0" />
+                )}
+              </button>
+
+              {settingsOpen && (
+                <div className={clsx('mt-1 space-y-1', collapsed ? '' : 'pl-4')}>
+                  {filteredSettingsNavItems.map((item) => {
+                    const Icon = item.icon
+                    const isActive = location.pathname === item.path ||
+                      (item.path !== '/' && location.pathname.startsWith(item.path))
+
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        onClick={() => setSidebarOpen(false)}
+                        title={collapsed ? item.label : undefined}
+                        className={clsx(
+                          'flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors text-sm',
+                          isActive
+                            ? 'bg-primary-50 text-primary-600'
+                            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700',
+                          collapsed ? 'lg:justify-center lg:px-0' : ''
+                        )}
+                      >
+                        <Icon size={16} className="flex-shrink-0" />
+                        {!collapsed && <span className="font-medium text-sm">{item.label}</span>}
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </nav>
 
         <div className="p-2 lg:p-4 border-t border-gray-200">
           {!collapsed && (
-            <div className="flex items-center gap-3 mb-4">
+            <Link
+              to="/profile"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-3 mb-4 rounded-lg transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+            >
               <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
                 <span className="text-primary-600 font-medium">
                   {user?.name?.charAt(0) || 'U'}
@@ -135,7 +210,7 @@ export default function Layout() {
                 <p className="font-medium text-gray-900 truncate">{user?.name}</p>
                 <p className="text-sm text-gray-500 truncate">{user?.email}</p>
               </div>
-            </div>
+            </Link>
           )}
           <button
             onClick={() => { logout(); navigate('/login') }}
@@ -169,6 +244,20 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* AI FAB — hidden on chat page so it doesn't block the send button */}
+      {location.pathname !== '/chat' && (
+        <Link
+          to="/chat"
+          title="AI 助手"
+          className="group fixed bottom-6 right-6 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 sm:h-14 sm:w-14"
+        >
+          <Bot size={24} className="sm:h-7 sm:w-7" />
+          <span className="pointer-events-none absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+            AI 助手
+          </span>
+        </Link>
+      )}
     </div>
   )
 }

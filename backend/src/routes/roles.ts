@@ -110,19 +110,25 @@ const DEFAULT_ROLES = [
   },
 ]
 
+let permissionsSeeded = false
+
 async function seedRolePermissions(prisma: any) {
-  await Promise.all(
-    DEFAULT_PERMISSIONS.map((permission) =>
-      prisma.permission.upsert({
-        where: { key: permission.key },
-        update: {
-          name: permission.name,
-          category: permission.category,
-        },
-        create: permission,
-      })
+  // Seed permissions only once per process lifetime
+  if (!permissionsSeeded) {
+    await Promise.all(
+      DEFAULT_PERMISSIONS.map((permission) =>
+        prisma.permission.upsert({
+          where: { key: permission.key },
+          update: {
+            name: permission.name,
+            category: permission.category,
+          },
+          create: permission,
+        })
+      )
     )
-  )
+    permissionsSeeded = true
+  }
 
   await Promise.all(
     DEFAULT_ROLES.map((role) =>
@@ -229,6 +235,9 @@ const roleRoutes = new Elysia()
           })
           // Invalidate cache for this role
           rolePermissionCache.delete(normalizedName)
+          // Refresh all roles so admin permissions are up-to-date
+          const { refreshAllRolePermissions } = await import('../index')
+          await refreshAllRolePermissions()
 
           return { role }
         },
@@ -284,6 +293,11 @@ const roleRoutes = new Elysia()
             })
             // Invalidate cache so next request re-loads from DB
             if (role.name) rolePermissionCache.delete(role.name)
+            // Also invalidate old name if it changed
+            if (existing.name !== role.name) rolePermissionCache.delete(existing.name)
+            // Refresh all roles so admin permissions are up-to-date
+            const { refreshAllRolePermissions } = await import('../index')
+            await refreshAllRolePermissions()
             return { role }
           } catch (error: any) {
             if (error?.code === 'P2002') {
@@ -320,6 +334,11 @@ const roleRoutes = new Elysia()
         }
 
         await prisma.role.delete({ where: { id: params.id } })
+
+        // Invalidate cache and refresh so admin permissions are up-to-date
+        rolePermissionCache.delete(role.name)
+        const { refreshAllRolePermissions } = await import('../index')
+        await refreshAllRolePermissions()
 
         return { success: true }
       })

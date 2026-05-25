@@ -10,16 +10,26 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
     if (query.taskId) where.taskId = query.taskId
     if (query.status) where.status = query.status
     if (query.reporterId) where.reporterId = query.reporterId
-    if (query.requirementId) where.requirementId = query.requirementId
-    if (query.projectId) where.projectId = query.projectId
-
-    // Testers and developers see only relevant bugs (data filtering, not permission denial)
-    if (user && (user.role === 'tester' || user.role === 'developer')) {
-      where.OR = [
-        { reporterId: user.id },
-        { task: { assigneeId: user.id } }
-      ]
+    const and: any[] = []
+    if (query.requirementId) {
+      and.push({
+        OR: [
+          { requirementId: query.requirementId },
+          { task: { requirements: { some: { requirementId: query.requirementId } } } }
+        ]
+      })
     }
+
+    if (user && (user.role === 'tester' || user.role === 'developer')) {
+      and.push({
+        OR: [
+          { reporterId: user.id },
+          { task: { assigneeId: user.id } }
+        ]
+      })
+    }
+
+    if (and.length) where.AND = and
 
     const bugs = await prisma.bug.findMany({
       where,

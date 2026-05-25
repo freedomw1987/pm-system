@@ -247,6 +247,37 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       role: t.String()
     })
   })
+  // Update project member role
+  .patch('/members/:memberId', async ({ params, body, set, user }) => {
+    const { role } = body as { role: string }
+    const membership = await prisma.projectMember.findUnique({ where: { id: params.memberId } })
+    if (!membership) {
+      set.status = 404
+      return { error: { code: 'NOT_FOUND', message: 'Member not found' } }
+    }
+
+    const requesterMembership = await prisma.projectMember.findFirst({
+      where: { projectId: membership.projectId, userId: user.id }
+    })
+
+    if (!user || (!hasPermission(user, 'users.assign_roles') && user.role !== 'admin' &&
+        requesterMembership?.role !== 'pm')) {
+      set.status = 403
+      return { error: { code: 'FORBIDDEN', message: 'Permission denied' } }
+    }
+
+    const updated = await prisma.projectMember.update({
+      where: { id: params.memberId },
+      data: { role },
+      include: { user: { select: { id: true, name: true, email: true } } }
+    })
+
+    return { member: updated }
+  }, {
+    body: t.Object({
+      role: t.String()
+    })
+  })
   // Remove project member
   .delete('/members/:memberId', async ({ params, set, user }) => {
     const membership = await prisma.projectMember.findUnique({ where: { id: params.memberId } })

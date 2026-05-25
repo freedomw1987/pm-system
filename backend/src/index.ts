@@ -14,10 +14,12 @@ import { attachmentRoutes } from './routes/attachments'
 import { roleRoutes } from './routes/roles'
 import wikiRoutes from './routes/wikis'
 import { llmConfigRoutes } from './routes/llm-config'
+import { documentRoutes } from './routes/documents'
+import { chatRoutes } from './routes/chat'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
-import { rolePermissionCache, setRolePermissions } from './middleware/permission'
+import { setRolePermissions } from './middleware/permission'
 
 // ─── In-memory role permissions cache ────────────────────────────────────────
 // Loaded from DB once per role. Managed by index.ts. Callers use setRolePermissions().
@@ -87,7 +89,6 @@ const app = new Elysia()
 
         // Load permissions for this role from cache/DB
         const permissions = role ? await loadRolePermissions(role) : []
-
         return { user: { id: userId, role: role || 'developer', permissions } }
       } catch {
         return { user: null }
@@ -104,6 +105,8 @@ const app = new Elysia()
     .use(roleRoutes)
     .use(wikiRoutes)
     .use(llmConfigRoutes)
+    .use(documentRoutes)
+    .use(chatRoutes)
   )
   .listen(4000)
 

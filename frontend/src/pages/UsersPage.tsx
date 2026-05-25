@@ -48,7 +48,7 @@ export default function UsersPage() {
       if (editingUser) {
         const data: any = { name: formData.name, email: formData.email }
         if (formData.password) data.password = formData.password
-        if (formData.role) data.role = formData.role
+        data.role = formData.role  // always send role on edit
         await userApi.update(editingUser.id, data)
       } else {
         await userApi.create({ email: formData.email, name: formData.name, password: formData.password, role: formData.role })

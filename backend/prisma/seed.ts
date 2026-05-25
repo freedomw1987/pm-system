@@ -13,75 +13,27 @@ const prisma = new PrismaClient({ adapter })
 async function main() {
   console.log('Seeding database...')
 
-  // Create admin user
-  const adminPassword = await bcrypt.hash('admin123', 10)
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@test.com' },
-    update: {},
-    create: {
-      email: 'admin@test.com',
-      name: '系統管理員',
-      passwordHash: adminPassword,
-      role: 'admin'
-    }
-  })
-  console.log('Created admin:', admin.email)
+  // Seed all built-in users — always reset role to correct built-in value
+  const builtInUsers = [
+    { email: 'admin@test.com', name: '系統管理員', password: 'admin123', role: 'admin' },
+    { email: 'pm@test.com', name: '產品經理', password: 'pm123', role: 'pm' },
+    { email: 'techlead@test.com', name: '技術主管', password: 'tl123', role: 'tech_lead' },
+    { email: 'dev@test.com', name: '開發人員', password: 'dev123', role: 'developer' },
+    { email: 'tester@test.com', name: '測試人員', password: 'test123', role: 'tester' },
+  ]
 
-  // Create PM user
-  const pmPassword = await bcrypt.hash('pm123', 10)
-  const pm = await prisma.user.upsert({
-    where: { email: 'pm@test.com' },
-    update: {},
-    create: {
-      email: 'pm@test.com',
-      name: '產品經理',
-      passwordHash: pmPassword,
-      role: 'pm'
-    }
-  })
-  console.log('Created pm:', pm.email)
-
-  // Create tech lead
-  const tlPassword = await bcrypt.hash('tl123', 10)
-  const techLead = await prisma.user.upsert({
-    where: { email: 'techlead@test.com' },
-    update: {},
-    create: {
-      email: 'techlead@test.com',
-      name: '技術主管',
-      passwordHash: tlPassword,
-      role: 'tech_lead'
-    }
-  })
-  console.log('Created tech lead:', techLead.email)
-
-  // Create developer
-  const devPassword = await bcrypt.hash('dev123', 10)
-  const developer = await prisma.user.upsert({
-    where: { email: 'dev@test.com' },
-    update: {},
-    create: {
-      email: 'dev@test.com',
-      name: '開發人員',
-      passwordHash: devPassword,
-      role: 'developer'
-    }
-  })
-  console.log('Created developer:', developer.email)
-
-  // Create tester
-  const testerPassword = await bcrypt.hash('test123', 10)
-  const tester = await prisma.user.upsert({
-    where: { email: 'tester@test.com' },
-    update: {},
-    create: {
-      email: 'tester@test.com',
-      name: '測試人員',
-      passwordHash: testerPassword,
-      role: 'tester'
-    }
-  })
-  console.log('Created tester:', tester.email)
+  // Lookup map: email -> user record after upsert
+  const userByEmail: Record<string, any> = {}
+  for (const u of builtInUsers) {
+    const pw = await bcrypt.hash(u.password, 10)
+    const user = await prisma.user.upsert({
+      where: { email: u.email },
+      update: { role: u.role, name: u.name },
+      create: { email: u.email, name: u.name, passwordHash: pw, role: u.role },
+    })
+    userByEmail[u.email] = user
+    console.log(`Created/updated user: ${user.email} (role=${user.role})`)
+  }
 
   // Create a sample project
   const project = await prisma.project.upsert({
@@ -92,39 +44,24 @@ async function main() {
       name: '範例項目',
       description: '這是一個範例項目，用於測試系統功能',
       status: 'active',
-      createdById: pm.id
-    }
+      createdById: userByEmail['pm@test.com'].id,
+    },
   })
   console.log('Created project:', project.name)
 
   // Add project members
-  await prisma.projectMember.upsert({
-    where: { projectId_userId: { projectId: project.id, userId: pm.id } },
-    update: {},
-    create: {
-      projectId: project.id,
-      userId: pm.id,
-      role: 'pm'
-    }
-  })
-  await prisma.projectMember.upsert({
-    where: { projectId_userId: { projectId: project.id, userId: techLead.id } },
-    update: {},
-    create: {
-      projectId: project.id,
-      userId: techLead.id,
-      role: 'tech_lead'
-    }
-  })
-  await prisma.projectMember.upsert({
-    where: { projectId_userId: { projectId: project.id, userId: developer.id } },
-    update: {},
-    create: {
-      projectId: project.id,
-      userId: developer.id,
-      role: 'developer'
-    }
-  })
+  const members = [
+    { user: userByEmail['pm@test.com'], role: 'pm' },
+    { user: userByEmail['techlead@test.com'], role: 'tech_lead' },
+    { user: userByEmail['dev@test.com'], role: 'developer' },
+  ]
+  for (const m of members) {
+    await prisma.projectMember.upsert({
+      where: { projectId_userId: { projectId: project.id, userId: m.user.id } },
+      update: {},
+      create: { projectId: project.id, userId: m.user.id, role: m.role },
+    })
+  }
   console.log('Added project members')
 
   // Create a sample requirement
@@ -137,8 +74,8 @@ async function main() {
       title: '用戶登入功能',
       description: '實現用戶 email/password 登入功能',
       status: 'in_progress',
-      createdById: pm.id
-    }
+      createdById: userByEmail['pm@test.com'].id,
+    },
   })
   console.log('Created requirement:', requirement.title)
 
@@ -152,9 +89,9 @@ async function main() {
       title: '設計登入頁面',
       description: '設計用戶登入介面',
       status: 'completed',
-      assigneeId: developer.id,
-      estimatedHours: 4
-    }
+      assigneeId: userByEmail['dev@test.com'].id,
+      estimatedHours: 4,
+    },
   })
 
   const task2 = await prisma.task.upsert({
@@ -166,29 +103,20 @@ async function main() {
       title: '實現後端登入 API',
       description: '實現 JWT 認證的登入 API',
       status: 'in_progress',
-      assigneeId: developer.id,
-      estimatedHours: 8
-    }
+      assigneeId: userByEmail['dev@test.com'].id,
+      estimatedHours: 8,
+    },
   })
   console.log('Created tasks')
 
   // Link tasks to requirements
-  await prisma.taskRequirement.upsert({
-    where: { taskId_requirementId: { taskId: task1.id, requirementId: requirement.id } },
-    update: {},
-    create: {
-      taskId: task1.id,
-      requirementId: requirement.id
-    }
-  })
-  await prisma.taskRequirement.upsert({
-    where: { taskId_requirementId: { taskId: task2.id, requirementId: requirement.id } },
-    update: {},
-    create: {
-      taskId: task2.id,
-      requirementId: requirement.id
-    }
-  })
+  for (const task of [task1, task2]) {
+    await prisma.taskRequirement.upsert({
+      where: { taskId_requirementId: { taskId: task.id, requirementId: requirement.id } },
+      update: {},
+      create: { taskId: task.id, requirementId: requirement.id },
+    })
+  }
 
   // Create sample bugs
   await prisma.bug.upsert({
@@ -202,8 +130,8 @@ async function main() {
       description: '在 iOS Safari 上密碼輸入框無法聚焦',
       severity: 'medium',
       status: 'open',
-      reporterId: tester.id
-    }
+      reporterId: userByEmail['tester@test.com'].id,
+    },
   })
   console.log('Created bugs')
 
