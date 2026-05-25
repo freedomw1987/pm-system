@@ -11,6 +11,7 @@
 | **Developer** | 開發人員，檢視/更新任務、填寫工作日誌 |
 | **Tester** | 測試人員，檢視/建立缺陷 |
 | **Visitor** | 檢視報表（僅讀取） |
+| **自定義角色** | AdminPanel 新增自定義角色，自訂權限組合 |
 
 ## 主要模組
 
@@ -18,15 +19,47 @@
 - **需求管理** — 建立需求、設定優先級、追蹤狀態
 - **任務與缺陷** — 工作時數記錄、缺陷追蹤
 - **角色與權限** — RBAC 權限控制（顆粒度到 permission 等級）
+- **AI 助手** — 自然語言操作項目數據（需求/缺陷/任務/Wiki 搜尋）
+- **文件管理** — 上傳 Word/Excel/PDF 文件，自動解析內容
+- **Wiki** — 項目 Wiki 文件，Markdown 編輯器
 - **報表** — 項目進度、產出統計
+
+## AI 助手
+
+AI 助手是系統的智能助理，可以理解自然語言並執行操作。
+
+### 功能
+
+- **專案綁定** — 每個對話可以綁定到特定項目，操作該項目的數據
+- **需求管理** — 自然語言建立、更新需求（"幫我新增一個高優先級需求"）
+- **缺陷管理** — 自然語言建立、更新缺陷（"記錄一個 bug"）
+- **任務管理** — 自然語言建立、查詢任務（"建立任務指派給張三"）
+- **Wiki 搜尋** — 搜尋項目 Wiki 文件並總結內容（"幫我總結這個項目的需求"）
+- **工具執行** — 所有操作都有明確的成功/失敗回饋
+
+### 配置（Admin）
+
+首次使用需要由 Admin 在「系統設定」配置 LLM API：
+
+1. 以 Admin 身份登入
+2. 進入「系統設定」
+3. 填入 API URL 和 API Key，選擇模型
+4. 儲存後 AI 助手即可使用
+
+### 支援的模型
+
+任何 OpenAI-compatible API endpoint 都支援，例如：
+- OpenAI GPT-4o / GPT-4o-mini
+- OpenRouter 上的模型（Claude、Gemma 等）
+- 本地模型（Ollama）
 
 ## 快速開始（本地開發）
 
 ### 前置需求
 
 - Docker & Docker Compose
-- Node.js 20+（如需單獨跑前端）
 - Bun（如需跑後端）
+- Node.js 20+（如需跑前端）
 
 ### 啟動
 
@@ -113,6 +146,7 @@ curl https://pm.david-developer.com/health
 - **Backend** — Bun + Elysia.js + Prisma + PostgreSQL
 - **Database** — PostgreSQL 15
 - **Auth** — JWT（access token + refresh token，7天過期）
+- **AI** — OpenAI-compatible LLM API with tool calling
 
 ## 環境變數
 
@@ -131,6 +165,7 @@ curl https://pm.david-developer.com/health
 | Backend | Bun + Elysia.js |
 | ORM | Prisma |
 | Database | PostgreSQL 15 |
+| AI | OpenAI-compatible LLM API (tool calling) |
 | Reverse Proxy | Nginx |
 | Container | Docker + Docker Compose |
 
@@ -155,8 +190,8 @@ bun src/index.ts  # port 4000
 
 # Frontend（新terminal）
 cd frontend
-npm install
-npm run dev       # port 5173
+bun install
+bun run dev       # port 5173
 ```
 
 ## License
