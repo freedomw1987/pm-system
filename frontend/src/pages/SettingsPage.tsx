@@ -20,7 +20,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetch('/api/llm-config', {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` }
     })
       .then(r => r.json())
       .then(data => {
@@ -48,7 +48,7 @@ export default function SettingsPage() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('accessToken')}`
         },
         body: JSON.stringify(body)
       })
