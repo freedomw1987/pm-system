@@ -92,7 +92,7 @@ export default function ChatPage() {
     }
   }
 
-  const createSession = async (projectId?: string) => {
+  const createSession = async (projectId?: string): Promise<ChatSession | null> => {
     try {
       const res = await fetch('/api/chat/sessions', {
         method: 'POST',
@@ -108,8 +108,10 @@ export default function ChatPage() {
       setMessages([])
       setActiveSession(newSession)
       setSidebarOpen(false)
+      return newSession
     } catch (e) {
       console.error(e)
+      return null
     }
   }
 
@@ -348,6 +350,31 @@ export default function ChatPage() {
               <p className="text-gray-400 text-sm max-w-xs">
                 選擇或建立一個對話，AI 會幫你管理項目中的需求、任務和缺陷
               </p>
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md px-4">
+                {[
+                  { icon: '📋', text: '查看這個項目的所有需求' },
+                  { icon: '🐛', text: '新增一個缺陷' },
+                  { icon: '✅', text: '建立一個任務' },
+                  { icon: '📄', text: '搜尋 Wiki 文件' },
+                ].map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      createSession(selectedProjectId || undefined).then(session => {
+                        if (session) {
+                          setActiveSession(session)
+                          setMessages([])
+                          setInput(prompt.text)
+                        }
+                      })
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-left text-sm text-gray-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-colors shadow-sm"
+                  >
+                    <span>{prompt.icon}</span>
+                    <span className="text-xs">{prompt.text}</span>
+                  </button>
+                ))}
+              </div>
               <button
                 onClick={() => createSession(selectedProjectId || undefined)}
                 className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 text-sm"
