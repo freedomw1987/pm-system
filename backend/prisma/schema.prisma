@@ -30,6 +30,7 @@ model User {
   refreshTokens       RefreshToken[]
   createdWikiPages    WikiPage[]
   chatSessions       ChatSession[]
+  artifacts          Artifact[]
 
   @@map("users")
 }
@@ -122,12 +123,14 @@ model Project {
   // Relations
   owner        User            @relation("ProjectOwner", fields: [createdById], references: [id])
   members      ProjectMember[]
+  agents       ProjectAgent[]
   requirements Requirement[]
   tasks        Task[]
   bugs         Bug[]
   wikiPages    WikiPage[]
   attachments  Attachment[]
   chatSessions ChatSession[]
+  artifacts    Artifact[]
 
   @@map("projects")
 }
@@ -145,6 +148,68 @@ model ProjectMember {
 
   @@unique([projectId, userId])
   @@map("project_members")
+}
+
+model AIAgent {
+  id           String   @id @default(uuid())
+  name         String
+  description  String?
+  model        String   @default("gpt-4o")
+  apiUrl       String   @default("https://api.openai.com/v1")
+  apiKey       String   // stored encrypted
+  skills       String[] @default([])
+  mcpServers   Json?    // [{ name, url }]
+  systemPrompt String?  @db.Text
+  status       String   @default("offline") // online, offline, busy
+  lastActiveAt DateTime? @map("last_active_at")
+  isActive     Boolean  @default(true)
+  config       Json?    // free-form config
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  projectAgents ProjectAgent[]
+  artifacts     Artifact[]
+  workLogs      WorkLog[]
+
+  @@map("ai_agents")
+}
+
+// Project-level AI agent membership (separate from ProjectMember which is for users)
+model ProjectAgent {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  agentId   String   @map("agent_id")
+  role      String   @default("developer") // same roles as ProjectMember
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  agent   AIAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, agentId])
+  @@map("project_agents")
+}
+
+model Artifact {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  taskId    String?  @map("task_id")
+  agentId   String?  @map("agent_id")
+  userId    String?  @map("user_id")
+  type      String   @default("doc") // code, doc, image, data
+  name      String
+  content   String   @db.Text
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project Project?  @relation(fields: [projectId], references: [id])
+  task    Task?     @relation(fields: [taskId], references: [id])
+  agent   AIAgent?  @relation(fields: [agentId], references: [id])
+  user    User?     @relation(fields: [userId], references: [id])
+
+  @@map("artifacts")
 }
 
 model Requirement {
@@ -172,9 +237,12 @@ model Task {
   projectId      String   @map("project_id")
   title          String
   description    String?
+  lane           String   @default("backlog") // backlog, in_progress, in_review, done
   assigneeId     String?  @map("assignee_id")
+  assigneeType   String   @default("user") // user, agent
   status         String   @default("pending") // pending, in_progress, completed
   estimatedHours Decimal? @map("estimated_hours")
+  dueDate        DateTime? @map("due_date")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -184,6 +252,7 @@ model Task {
   requirements TaskRequirement[]
   bugs         Bug[]
   workLogs     WorkLog[]
+  artifacts    Artifact[]
 
   @@map("tasks")
 }
@@ -227,6 +296,7 @@ model Bug {
 model WorkLog {
   id          String   @id @default(uuid())
   userId      String   @map("user_id")
+  agentId     String?  @map("agent_id")
   taskId      String?  @map("task_id")
   bugId       String?  @map("bug_id")
   hours       Decimal  @db.Decimal(4, 2)
@@ -235,9 +305,10 @@ model WorkLog {
   createdAt   DateTime @default(now()) @map("created_at")
 
   // Relations
-  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  bug  Bug?  @relation(fields: [bugId], references: [id], onDelete: Cascade)
+  user  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent AIAgent? @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  task  Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  bug   Bug?     @relation(fields: [bugId], references: [id], onDelete: Cascade)
 
   @@map("work_logs")
 }

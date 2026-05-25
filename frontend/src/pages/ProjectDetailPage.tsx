@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip } from 'lucide-react'
+import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, Columns } from 'lucide-react'
 import { projectApi, requirementApi, userApi, roleApi } from '../utils/api'
 import type { Project, Requirement, User, ProjectMember, Role } from '../types'
 import { useAuth } from '../context/AuthContext'
@@ -237,6 +237,12 @@ export default function ProjectDetailPage() {
         <button onClick={() => setActiveTab('members')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'members' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <Users size={18} className="inline mr-2" />成員 ({project.members?.length || 0})
         </button>
+        <Link
+          to={`/projects/${id}/kanban`}
+          className="pb-3 px-2 font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1"
+        >
+          <Columns size={18} className="inline mr-2" />Kanban
+        </Link>
         <button onClick={() => setActiveTab('wiki')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'wiki' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <BookOpen size={18} className="inline mr-2" />Wiki
         </button>

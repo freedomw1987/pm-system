@@ -9,6 +9,7 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
 
     if (query.projectId) where.projectId = query.projectId
     if (query.status) where.status = query.status
+    if (query.lane) where.lane = query.lane
     if (query.requirementId) where.requirements = { some: { requirementId: query.requirementId } }
 
     // Developers and testers can only see their own tasks
@@ -36,12 +37,15 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
   })
   // Create task (Tech Lead or Admin with tasks.create)
   .post('/', async ({ body, set, user }) => {
-    const { title, description, assigneeId, requirementIds, estimatedHours, projectId } = body as {
+    const { title, description, assigneeId, assigneeType, lane, requirementIds, estimatedHours, dueDate, projectId } = body as {
       title: string
       description?: string
       assigneeId?: string
+      assigneeType?: string
+      lane?: string
       requirementIds?: string[]
       estimatedHours?: number
+      dueDate?: string
       projectId?: string
     }
 
@@ -56,7 +60,10 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
         title,
         description,
         assigneeId,
+        assigneeType: assigneeType || 'user',
+        lane: lane || 'backlog',
         estimatedHours,
+        dueDate: dueDate ? new Date(dueDate) : undefined,
         projectId,
         requirements: requirementIds ? {
           create: requirementIds.map(rid => ({ requirementId: rid }))
@@ -76,8 +83,11 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       title: t.String(),
       description: t.Optional(t.String()),
       assigneeId: t.Optional(t.String()),
+      assigneeType: t.Optional(t.String()),
+      lane: t.Optional(t.String()),
       requirementIds: t.Optional(t.Array(t.String())),
       estimatedHours: t.Optional(t.Number()),
+      dueDate: t.Optional(t.String()),
       projectId: t.Optional(t.String())
     })
   })
@@ -108,12 +118,15 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
   })
   // Update task
   .put('/:id', async ({ params, body, set, user }) => {
-    const { title, description, status, assigneeId, estimatedHours } = body as {
+    const { title, description, status, lane, assigneeId, assigneeType, estimatedHours, dueDate } = body as {
       title?: string
       description?: string
       status?: string
+      lane?: string
       assigneeId?: string
+      assigneeType?: string
       estimatedHours?: number
+      dueDate?: string
     }
 
     const existing = await prisma.task.findUnique({ where: { id: params.id } })
@@ -131,9 +144,19 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       }
     }
 
+    const data: any = {}
+    if (title !== undefined) data.title = title
+    if (description !== undefined) data.description = description
+    if (status !== undefined) data.status = status
+    if (lane !== undefined) data.lane = lane
+    if (assigneeId !== undefined) data.assigneeId = assigneeId
+    if (assigneeType !== undefined) data.assigneeType = assigneeType
+    if (estimatedHours !== undefined) data.estimatedHours = estimatedHours
+    if (dueDate !== undefined) data.dueDate = new Date(dueDate)
+
     const task = await prisma.task.update({
       where: { id: params.id },
-      data: { title, description, status, assigneeId, estimatedHours },
+      data,
       include: {
         assignee: { select: { id: true, name: true } },
         requirements: {

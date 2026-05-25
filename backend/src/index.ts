@@ -16,6 +16,8 @@ import wikiRoutes from './routes/wikis'
 import { llmConfigRoutes } from './routes/llm-config'
 import { documentRoutes } from './routes/documents'
 import { chatRoutes } from './routes/chat'
+import { agentRoutes } from './routes/agents'
+import { projectAgentRoutes } from './routes/project-agents'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
@@ -96,6 +98,7 @@ const app = new Elysia()
     })
     .use(userRoutes)
     .use(projectRoutes)
+    .use(projectAgentRoutes)
     .use(requirementRoutes)
     .use(taskRoutes)
     .use(bugRoutes)
@@ -107,6 +110,7 @@ const app = new Elysia()
     .use(llmConfigRoutes)
     .use(documentRoutes)
     .use(chatRoutes)
+    .use(agentRoutes)
   )
   .listen(4000)
 

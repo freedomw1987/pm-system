@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
 const settingsNavItems: NavItem[] = [
   { path: '/users', icon: Users, label: '用戶管理', permissions: ['users.view'] },
   { path: '/roles', icon: ShieldCheck, label: '角色權限', permissions: ['roles.view'] },
+  { path: '/agents', icon: Bot, label: 'AI Agent', permissions: ['agents.view'], adminOnly: true },
   { path: '/settings', icon: Settings, label: 'AI 設定', permissions: [], adminOnly: true },
 ]
 

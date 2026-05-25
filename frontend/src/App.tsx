@@ -18,6 +18,8 @@ import SettingsPage from './pages/SettingsPage'
 import ChatPage from './pages/ChatPage'
 import ProfilePage from './pages/ProfilePage'
 import WikiPage from './pages/WikiPage'
+import ProjectKanbanPage from './pages/ProjectKanbanPage'
+import AgentsPage from './pages/AgentsPage'
 
 // Layout
 import Layout from './components/Layout'
@@ -52,6 +54,7 @@ function App() {
             <Route index element={<DashboardPage />} />
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="projects/:id" element={<ProjectDetailPage />} />
+            <Route path="projects/:id/kanban" element={<ProjectKanbanPage />} />
             <Route path="requirements/:id" element={<RequirementDetailPage />} />
             <Route path="my-requirements" element={<MyRequirementsPage />} />
             <Route path="my-tasks" element={<MyTasksPage />} />
@@ -65,6 +68,7 @@ function App() {
             <Route path="profile" element={<ProfilePage />} />
             <Route path="wiki" element={<WikiPage />} />
             <Route path="wiki/:projectId" element={<WikiPage />} />
+            <Route path="agents" element={<AgentsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
