@@ -29,6 +29,7 @@ model User {
   uploadedAttachments Attachment[]
   refreshTokens       RefreshToken[]
   createdWikiPages    WikiPage[]
+  chatSessions       ChatSession[]
 
   @@map("users")
 }
@@ -50,6 +51,63 @@ model Permission {
   category String
 }
 
+model LLMConfig {
+  id        String   @id @default(uuid())
+  apiUrl    String
+  apiKey    String   // stored encrypted, revealed only on demand
+  model     String
+  updatedAt DateTime @updatedAt
+
+  @@map("llm_configs")
+}
+
+model WikiPage {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  title      String
+  content    String   @db.Text
+  tags       String[] @default([])
+  order      Int      @default(0)
+  createdById String  @map("created_by_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@map("wiki_pages")
+}
+
+model ChatSession {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  projectId String?  @map("project_id")
+  title     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user     User          @relation(fields: [userId], references: [id])
+  project  Project?       @relation(fields: [projectId], references: [id])
+  messages ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  role      String   // 'user' | 'assistant' | 'system'
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("chat_messages")
+}
+
 model Project {
   id          String    @id @default(uuid())
   name        String
@@ -69,25 +127,9 @@ model Project {
   bugs         Bug[]
   wikiPages    WikiPage[]
   attachments  Attachment[]
+  chatSessions ChatSession[]
 
   @@map("projects")
-}
-
-model WikiPage {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  title     String
-  content   String   @db.Text
-  order     Int      @default(0)
-  createdById String @map("created_by_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy User    @relation(fields: [createdById], references: [id])
-
-  @@map("wiki_pages")
 }
 
 model ProjectMember {

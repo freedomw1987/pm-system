@@ -1,0 +1,153 @@
+import { useState, useEffect } from 'react'
+import { Settings, Eye, EyeOff, Save, AlertCircle, CheckCircle } from 'lucide-react'
+
+interface LLMConfig {
+  id?: string
+  apiUrl: string
+  model: string
+  updatedAt?: string
+}
+
+export default function SettingsPage() {
+  const [config, setConfig] = useState<LLMConfig>({ apiUrl: '', model: '' })
+  const [apiKey, setApiKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [currentConfig, setCurrentConfig] = useState<LLMConfig | null>(null)
+
+  useEffect(() => {
+    fetch('/api/llm-config', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.id) {
+          setCurrentConfig(data)
+          setConfig({ apiUrl: data.apiUrl, model: data.model })
+        }
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setError('')
+    setSuccess('')
+    if (!config.apiUrl || !config.model) {
+      setError('請填寫 API URL 和 Model')
+      return
+    }
+    setSaving(true)
+    try {
+      const body: any = { apiUrl: config.apiUrl, model: config.model }
+      if (apiKey) body.apiKey = apiKey
+      const res = await fetch('/api/llm-config', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(body)
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error?.message || '儲存失敗')
+      setCurrentConfig(data)
+      setApiKey('')
+      setSuccess('設定已儲存')
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <div className="text-gray-500">載入中...</div>
+
+  return (
+    <div className="max-w-2xl">
+      <div className="flex items-center gap-3 mb-6">
+        <Settings size={28} className="text-primary-500" />
+        <h1 className="text-2xl font-bold text-gray-900">AI 設定</h1>
+      </div>
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700">
+          <AlertCircle size={18} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
+          <CheckCircle size={18} />
+          <span>{success}</span>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">API URL</label>
+          <input
+            type="url"
+            value={config.apiUrl}
+            onChange={e => setConfig(c => ({ ...c, apiUrl: e.target.value }))}
+            placeholder="https://openrouter.ai/api/v1"
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          />
+          <p className="mt-1 text-sm text-gray-500">例如：OpenRouter、Ollama、Fireworks AI 等</p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+          <input
+            type="text"
+            value={config.model}
+            onChange={e => setConfig(c => ({ ...c, model: e.target.value }))}
+            placeholder="openai/gpt-4o-mini"
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            API Key {currentConfig && <span className="text-gray-400 font-normal">（留空保持不變）</span>}
+          </label>
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="sk-or-v1-..."
+              className="w-full px-4 py-2.5 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey(s => !s)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </div>
+
+        {currentConfig && (
+          <div className="pt-4 border-t text-sm text-gray-500">
+            上次更新：{new Date(currentConfig.updatedAt!).toLocaleString('zh-HK')}
+          </div>
+        )}
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 px-6 py-2.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
+        >
+          <Save size={18} />
+          {saving ? '儲存中...' : '儲存設定'}
+        </button>
+      </div>
+    </div>
+  )
+}

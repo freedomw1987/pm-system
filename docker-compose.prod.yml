@@ -69,6 +69,8 @@ services:
       - POSTGRES_USER=pmuser
       - POSTGRES_PASSWORD=pmpassword
       - POSTGRES_DB=pmdb
+    ports:
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:

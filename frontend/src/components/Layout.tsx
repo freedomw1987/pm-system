@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, Settings, Bot } from 'lucide-react'
 import clsx from 'clsx'
 
-const navItems = [
+const navItems: Array<{ path: string; icon: any; label: string; permissions: string[]; adminOnly?: boolean }> = [
   { path: '/', icon: LayoutDashboard, label: '儀表板', permissions: [] },
   { path: '/projects', icon: FolderKanban, label: '項目', permissions: ['projects.view', 'projects.create'] },
   { path: '/my-requirements', icon: FileText, label: '我的需求', permissions: ['requirements.view'] },
@@ -12,8 +12,11 @@ const navItems = [
   { path: '/my-bugs', icon: Bug, label: '我的缺陷', permissions: ['bugs.view'] },
   { path: '/work-logs', icon: Clock, label: '工作時數', permissions: ['worklogs.view'] },
   { path: '/reports', icon: BarChart3, label: '報表', permissions: ['reports.view'] },
+  
+  { path: '/chat', icon: Bot, label: 'AI 助手', permissions: [] },
   { path: '/users', icon: Users, label: '用戶管理', permissions: ['users.view'] },
   { path: '/roles', icon: ShieldCheck, label: '角色權限', permissions: ['roles.view'] },
+  { path: '/settings', icon: Settings, label: 'AI 設定', permissions: [], adminOnly: true },
 ]
 
 /**
@@ -53,7 +56,10 @@ export default function Layout() {
     localStorage.setItem('sidebar-collapsed', String(newVal))
   }
 
-  const filteredNavItems = navItems.filter(item => hasAnyPermission(user, item.permissions))
+  const filteredNavItems = navItems.filter(item => {
+  if (item.adminOnly && user?.role !== 'admin') return false
+  return hasAnyPermission(user, item.permissions)
+})
 
   return (
     <div className="min-h-screen flex">
