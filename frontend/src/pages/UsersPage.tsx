@@ -1,16 +1,28 @@
 import { useEffect, useState } from 'react'
-import { Users, Trash2, UserPlus, Pencil } from 'lucide-react'
+import { Users, Trash2, UserPlus, Pencil, Upload, X, CheckCircle, AlertCircle } from 'lucide-react'
 import { userApi, roleApi } from '../utils/api'
 import type { User, Role } from '../types'
+
+interface BatchResult {
+  email: string
+  name: string
+  success: boolean
+  error?: string
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [showBatchForm, setShowBatchForm] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'developer' as string })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableRoles, setAvailableRoles] = useState<Role[]>([])
+  const [batchData, setBatchData] = useState('')
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([])
+  const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
+  const [batchPreview, setBatchPreview] = useState<{ name: string; email: string; role: string; password: string }[]>([])
 
   useEffect(() => { loadUsers() }, [])
 
@@ -63,6 +75,82 @@ export default function UsersPage() {
     setShowForm(true)
   }
 
+  const openBatchCreate = () => {
+    setBatchData('')
+    setBatchResults([])
+    setBatchPreview([])
+    setShowBatchForm(true)
+  }
+
+  const generatePassword = () => Math.random().toString(36).slice(-8)
+
+  // Parse batch data for preview
+  const parseBatchData = (data: string) => {
+    const lines = data.trim().split('\n')
+    const preview: { name: string; email: string; role: string; password: string }[] = []
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const cols = line.split('\t')
+      preview.push({
+        name: cols[0]?.trim() || '',
+        email: cols[1]?.trim() || '',
+        role: cols[2]?.trim() || 'developer',
+        password: cols[3]?.trim() || '(自動生成)'
+      })
+    }
+    return preview
+  }
+
+  const handleBatchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!batchData.trim()) return
+
+    setIsBatchSubmitting(true)
+    setBatchResults([])
+
+    const lines = batchData.trim().split('\n')
+    const results: BatchResult[] = []
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+
+      const cols = line.split('\t')
+      const name = cols[0]?.trim()
+      const email = cols[1]?.trim()
+      const role = cols[2]?.trim() || 'developer'
+      const password = cols[3]?.trim() || generatePassword()
+
+      if (!name || !email) {
+        results.push({ name: name || '(無姓名)', email: email || '(無電郵)', success: false, error: '姓名和電郵為必填' })
+        continue
+      }
+
+      // Validate email format
+      if (!email.includes('@')) {
+        results.push({ name, email, success: false, error: '電郵格式無效' })
+        continue
+      }
+
+      try {
+        await userApi.create({ name, email, password, role })
+        results.push({ name, email, success: true })
+      } catch (err: any) {
+        const msg = err?.response?.data?.error?.message || '創建失敗'
+        results.push({ name, email, success: false, error: msg })
+      }
+    }
+
+    setBatchResults(results)
+    setIsBatchSubmitting(false)
+
+    if (results.every(r => r.success)) {
+      setTimeout(() => {
+        setShowBatchForm(false)
+        loadUsers()
+      }, 1500)
+    }
+  }
+
   const BUILT_IN_LABELS: Record<string, string> = {
     admin: '系統管理員', pm: '項目經理', tech_lead: '技術主管', developer: '開發人員', tester: '測試人員', visitor: '訪客'
   }
@@ -79,9 +167,14 @@ export default function UsersPage() {
           <h1 className="text-3xl font-bold text-gray-900">用戶管理</h1>
           <p className="text-gray-500 mt-1">管理系統用戶帳號與項目角色</p>
         </div>
-        <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-          <UserPlus size={20} /> 新建用戶
+        <div className="flex items-center gap-2">
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+            <UserPlus size={20} /> 新建用戶
+          </button>
+          <button onClick={openBatchCreate} className="btn-secondary flex items-center gap-2">
+          <Upload size={20} /> 批量新增
         </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -172,6 +265,113 @@ export default function UsersPage() {
                 <button type="button" onClick={() => { setShowForm(false); setEditingUser(null) }} className="btn-secondary">取消</button>
                 <button type="submit" disabled={isSubmitting} className="btn-primary">
                   {isSubmitting ? (editingUser ? '儲存中...' : '創建中...') : (editingUser ? '儲存' : '創建')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showBatchForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">批量新增用戶</h2>
+              <button onClick={() => setShowBatchForm(false)} className="p-1 hover:bg-gray-100 rounded-lg">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
+              <p className="font-medium text-blue-800 mb-1">📋 Excel 格式說明</p>
+              <p className="text-blue-700">直接從 Excel 複製貼上即可。</p>
+              <p className="text-blue-700 mt-1">格式：<span className="font-mono bg-blue-100 px-1">姓名</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">電郵</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">角色</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">密碼(可留空)</span></p>
+              <p className="text-blue-600 mt-1">角色可選：admin, pm, tech_lead, developer, tester</p>
+            </div>
+
+            <form onSubmit={handleBatchSubmit} className="flex-1 flex flex-col">
+              <div className="flex-1 mb-4">
+                <textarea
+                  value={batchData}
+                  onChange={(e) => {
+                    setBatchData(e.target.value)
+                    setBatchPreview(parseBatchData(e.target.value))
+                  }}
+                  placeholder="張三	zhangsan@example.com	developer	pass123
+李四	lisi@example.com	pm
+王五	wangwu@example.com	developer"
+                  className="w-full h-48 p-3 border rounded-lg font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Preview Table */}
+              {batchPreview.length > 0 && (
+                <div className="mb-4 max-h-60 overflow-auto border rounded-lg">
+                  <div className="p-2 bg-gray-50 border-b sticky top-0">
+                    <p className="text-sm font-medium text-gray-700">預覽（共 {batchPreview.length} 筆）</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-8">
+                      <tr className="text-left text-gray-500">
+                        <th className="p-2 font-medium">姓名</th>
+                        <th className="p-2 font-medium">電郵</th>
+                        <th className="p-2 font-medium">角色</th>
+                        <th className="p-2 font-medium">密碼</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {batchPreview.map((row, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="p-2">{row.name || <span className="text-red-400">必填</span>}</td>
+                          <td className="p-2">{row.email || <span className="text-red-400">必填</span>}</td>
+                          <td className="p-2">
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${
+                              row.role === 'admin' ? 'bg-red-100 text-red-700' :
+                              row.role === 'pm' ? 'bg-purple-100 text-purple-700' :
+                              row.role === 'tech_lead' ? 'bg-blue-100 text-blue-700' :
+                              row.role === 'developer' ? 'bg-orange-100 text-orange-700' :
+                              row.role === 'tester' ? 'bg-green-100 text-green-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {row.role || 'developer'}
+                            </span>
+                          </td>
+                          <td className="p-2 text-gray-400 text-xs">{row.password}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {batchResults.length > 0 && (
+                <div className="mb-4 max-h-48 overflow-y-auto border rounded-lg">
+                  <div className="p-2 bg-gray-50 border-b sticky top-0">
+                    <p className="text-sm font-medium">
+                      結果：{batchResults.filter(r => r.success).length}/{batchResults.length} 成功
+                    </p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {batchResults.map((r, i) => (
+                      <div key={i} className="p-2 flex items-center gap-2 text-sm">
+                        {r.success ? (
+                          <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                        )}
+                        <span className="font-medium">{r.name}</span>
+                        <span className="text-gray-500">{r.email}</span>
+                        {!r.success && <span className="text-red-500 text-xs">{r.error}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 justify-end">
+                <button type="button" onClick={() => setShowBatchForm(false)} className="btn-secondary">取消</button>
+                <button type="submit" disabled={isBatchSubmitting || !batchData.trim()} className="btn-primary">
+                  {isBatchSubmitting ? '處理中...' : '確認新增'}
                 </button>
               </div>
             </form>
