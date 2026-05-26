@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, CheckCircle, Bug as BugIcon, AlertTriangle, Edit2, Trash2, X, Clock } from 'lucide-react'
+import { ArrowLeft, Plus, CheckCircle, Bug as BugIcon, AlertTriangle, Edit2, Trash2, X, Clock, Bot } from 'lucide-react'
 import { requirementApi, taskApi, bugApi, projectApi, workLogApi } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
@@ -32,6 +32,9 @@ export default function RequirementDetailPage() {
   const [newTaskDesc, setNewTaskDesc] = useState('')
   const [newTaskAssignee, setNewTaskAssignee] = useState('')
   const [isAddingTask, setIsAddingTask] = useState(false)
+  const [autoAssignAgent, setAutoAssignAgent] = useState(true)
+  const [recommendedAgent, setRecommendedAgent] = useState<{ id: string; name: string; skills: string[] } | null>(null)
+  const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null)
 
   // Task edit
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -150,15 +153,30 @@ export default function RequirementDetailPage() {
     if (!newTaskTitle.trim()) return
     setIsAddingTask(true)
     try {
-      await taskApi.create({
+      // Create task
+      const result = await taskApi.create({
         title: newTaskTitle,
         description: newTaskDesc,
         assigneeId: newTaskAssignee || undefined,
         requirementIds: [id!],
         projectId: requirement?.projectId
       })
+
+      const taskId = result.data.task?.id
+
+      // Auto-assign to recommended agent if enabled and we have a task ID
+      if (autoAssignAgent && taskId && recommendedAgent) {
+        try {
+          await taskApi.autoAssign(taskId)
+        } catch (autoErr) {
+          console.error('Auto-assign failed:', autoErr)
+          // Continue even if auto-assign fails
+        }
+      }
+
       setShowAddTask(false)
       setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee('')
+      setRecommendedAgent(null)
       loadData()
     } catch (err) {
       console.error(err)
@@ -167,6 +185,69 @@ export default function RequirementDetailPage() {
       setIsAddingTask(false)
     }
   }
+
+  // Get recommendation when title changes
+  useEffect(() => {
+    if (newTaskTitle.trim() && newTaskTitle.length >= 3) {
+      // Debounce the recommendation
+      const timer = setTimeout(async () => {
+        try {
+          // Get agents overview for matching
+          const agentsResponse = await taskApi.getAgentsOverview()
+          const agents = agentsResponse.data.agents || []
+
+          // Simple keyword matching
+          const keywords = (newTaskTitle + ' ' + newTaskDesc).toLowerCase().match(/\w{2,}/g) || []
+
+          const skillKeywords: Record<string, string[]> = {
+            code_review: ['代碼審查', 'code review', 'review', 'pull request', 'pr', '審視', '審核'],
+            testing: ['測試', 'test', 'unit test', '測試用例', '自動化'],
+            documentation: ['文檔', 'docs', 'readme', 'wiki', '手冊'],
+            bug_analysis: ['bug', 'bug分析', '錯誤', '除錯', 'debug', '問題', '修復'],
+            refactoring: ['重構', 'refactor', '優化'],
+            security_audit: ['安全', 'security', '漏洞', '審計'],
+            performance: ['性能', '效能', '優化', 'slow'],
+            design: ['設計', '架構', 'architecture', '系統設計']
+          }
+
+          let bestAgent: typeof agents[0] | null = null
+          let bestScore = 0
+          let matchedSkills: string[] = []
+
+          for (const agent of agents) {
+            if (agent.activeTasks >= agent.maxConcurrentTasks) continue
+            const score = (agent.skills || []).filter((skill: string) => {
+              const kws = skillKeywords[skill] || []
+              return keywords.some((kw: string) => kws.some((k: string) => k.includes(kw) || kw.includes(k)))
+            }).length
+
+            if (score > bestScore) {
+              bestScore = score
+              bestAgent = agent
+              matchedSkills = (agent.skills || []).filter((skill: string) => {
+                const kws = skillKeywords[skill] || []
+                return keywords.some((kw: string) => kws.some((k: string) => k.includes(kw) || kw.includes(k)))
+              })
+            }
+          }
+
+          if (bestAgent && bestScore > 0) {
+            setRecommendedAgent({ id: bestAgent.id, name: bestAgent.name, skills: matchedSkills })
+            if (autoAssignAgent) {
+              setNewTaskAssignee(bestAgent.id)
+            }
+          } else {
+            setRecommendedAgent(null)
+          }
+        } catch (err) {
+          console.error('Failed to get recommendation:', err)
+        }
+      }, 500)
+      return () => clearTimeout(timer)
+    } else {
+      setRecommendedAgent(null)
+    }
+  }, [newTaskTitle, newTaskDesc])
 
   const openEditTask = (task: Task) => {
     setEditingTask(task)
@@ -214,6 +295,36 @@ export default function RequirementDetailPage() {
       loadData()
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  // Get recommendation and assign existing task to agent
+  const handleAssignToAgent = async (task: Task) => {
+    if (task.assignee && task.assignee.name !== 'N/A') {
+      if (!confirm(`任務已分配給 ${task.assignee.name}，確定要重新分配給 AI Agent 嗎？`)) {
+        return
+      }
+    }
+
+    setAssigningTaskId(task.id)
+    try {
+      // Get recommendation
+      const response = await taskApi.getRecommendation(task.id)
+      const recommendation = response.data.recommendation
+
+      if (recommendation?.agent) {
+        // Auto assign to best agent
+        await taskApi.autoAssign(task.id)
+        alert(`任務已分配給 ${recommendation.agent.name}`)
+        loadData()
+      } else {
+        alert('找不到擅長此任務的 Agent')
+      }
+    } catch (err) {
+      console.error('Failed to assign task:', err)
+      alert('分配失敗')
+    } finally {
+      setAssigningTaskId(null)
     }
   }
 
@@ -517,6 +628,21 @@ export default function RequirementDetailPage() {
                           <Edit2 size={14} />
                         </button>
                       )}
+                      {/* Assign to Agent button - for all pending tasks */}
+                      {task.status === 'pending' && (
+                        <button
+                          onClick={() => handleAssignToAgent(task)}
+                          disabled={assigningTaskId === task.id}
+                          className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="派給 Agent"
+                        >
+                          {assigningTaskId === task.id ? (
+                            <div className="w-3.5 h-3.5 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Bot size={14} />
+                          )}
+                        </button>
+                      )}
                       {canDeleteTask && (
                         <button onClick={() => handleDeleteTask(task.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="刪除任務">
                           <Trash2 size={14} />
@@ -666,6 +792,57 @@ export default function RequirementDetailPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
                 <RichTextEditor value={newTaskDesc} onChange={setNewTaskDesc} placeholder="輸入任務描述" rows={6} />
               </div>
+
+              {/* Smart Assignment */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-5 h-5 text-blue-600" />
+                    <span className="font-medium text-gray-900">智能分配</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoAssignAgent}
+                      onChange={(e) => {
+                        setAutoAssignAgent(e.target.checked)
+                        if (e.target.checked && recommendedAgent) {
+                          setNewTaskAssignee(recommendedAgent.id)
+                        } else if (!e.target.checked) {
+                          setNewTaskAssignee('')
+                        }
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {recommendedAgent ? (
+                  <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-blue-200">
+                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                      <Bot className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900">{recommendedAgent.name}</p>
+                      <p className="text-sm text-gray-500">
+                        匹配技能：
+                        {recommendedAgent.skills.map((s) => (
+                          <span key={s} className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{s}</span>
+                        ))}
+                      </p>
+                    </div>
+                    {autoAssignAgent && (
+                      <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">將自動分配</span>
+                    )}
+                  </div>
+                ) : newTaskTitle.length >= 3 ? (
+                  <p className="text-sm text-gray-500">正在分析任務內容...</p>
+                ) : (
+                  <p className="text-sm text-gray-400">輸入任務標題以獲取推薦</p>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
                 <select value={newTaskAssignee} onChange={(e) => setNewTaskAssignee(e.target.value)} className="input-field w-full">

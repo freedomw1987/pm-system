@@ -5,9 +5,70 @@ export interface User {
   name: string
   role?: 'admin' | 'pm' | 'tech_lead' | 'developer' | 'tester' | 'Visitor'
   permissions?: string[]
+  isAgent?: boolean
+  agentConfig?: {
+    model?: string
+    maxConcurrentTasks?: number
+    personality?: string
+  }
   createdAt?: string
   /** Per-project memberships — populated in user list for RBAC display */
   projectMemberships?: { projectId: string; projectName: string; role: string }[]
+}
+
+// Agent types
+export interface Agent {
+  id: string
+  email: string
+  name: string
+  role: string
+  isAgent: boolean
+  agentConfig?: {
+    token?: string
+    maxConcurrentTasks?: number
+    temperature?: number
+    systemPrompt?: string
+    skills?: string[]
+    mcpServers?: string[]
+  }
+  createdAt: string
+  stats?: {
+    activeTasks: number
+    totalTokenLogs: number
+    totalTokensUsed: number
+  }
+  assignedTasks?: {
+    id: string
+    title: string
+    status: string
+    projectId: string
+    project?: { id: string; name: string }
+    createdAt: string
+    updatedAt: string
+  }[]
+}
+
+export interface TokenLog {
+  id: string
+  userId: string
+  user?: User
+  taskId?: string
+  task?: { id: string; title: string; projectId?: string }
+  tokensUsed: number
+  inputTokens?: number
+  outputTokens?: number
+  model: string
+  costUSD?: number
+  date: string
+  description?: string
+  createdAt: string
+}
+
+export interface TokenSummary {
+  totalTokens: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  count: number
 }
 
 export interface Role {
@@ -71,12 +132,15 @@ export interface Task {
   id: string
   title: string
   description?: string
-  assignee?: User
+  assignee?: User & { isAgent?: boolean }
+  assigneeId?: string
   status: 'pending' | 'in_progress' | 'testing' | 'completed'
   estimatedHours?: number
+  claimedByAgentAt?: string
   createdAt: string
   requirements?: { requirement: Requirement }[]
   workLogs?: WorkLog[]
+  project?: { id: string; name: string }
 }
 
 // Bug types

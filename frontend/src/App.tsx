@@ -18,6 +18,7 @@ import SettingsPage from './pages/SettingsPage'
 import ChatPage from './pages/ChatPage'
 import ProfilePage from './pages/ProfilePage'
 import WikiPage from './pages/WikiPage'
+import AgentsPage from './pages/AgentsPage'
 
 // Layout
 import Layout from './components/Layout'
@@ -65,6 +66,7 @@ function App() {
             <Route path="profile" element={<ProfilePage />} />
             <Route path="wiki" element={<WikiPage />} />
             <Route path="wiki/:projectId" element={<WikiPage />} />
+            <Route path="agents" element={<AgentsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

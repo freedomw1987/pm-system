@@ -1,6 +1,9 @@
 import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
+import { findBestAgent, getAgentsSkillOverview } from '../agent/skill-matcher'
+import { broadcastToAgents, getConnectedAgents } from '../agent/runtime'
+import { executeTask } from '../agent/task-executor'
 
 const taskRoutes = new Elysia({ prefix: '/tasks' })
   // Get tasks (filtered by assignee for developers)
@@ -66,9 +69,28 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
         assignee: { select: { id: true, name: true } },
         requirements: {
           include: { requirement: { select: { id: true, title: true } } }
-        }
+        },
+        project: { select: { id: true, name: true } }
       }
     })
+
+    // Notify connected agents about new task
+    const connectedAgentIds = getConnectedAgents()
+    if (connectedAgentIds.length > 0 && !assigneeId) {
+      // Only broadcast if task is unassigned
+      broadcastToAgents({
+        type: 'new_task',
+        payload: {
+          task: {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            projectId: task.projectId,
+            projectName: task.project?.name
+          }
+        }
+      })
+    }
 
     return { task }
   }, {
@@ -153,6 +175,98 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
 
     await prisma.task.delete({ where: { id: params.id } })
     return { success: true }
+  })
+  // Recommend agent for a task (智能分配)
+  .get('/:id/recommend-agent', async ({ params, user }) => {
+    if (!user) {
+      return { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }
+    }
+
+    const task = await prisma.task.findUnique({
+      where: { id: params.id },
+      include: {
+        project: { select: { id: true, name: true } },
+        requirements: {
+          include: { requirement: { select: { id: true, title: true } } }
+        }
+      }
+    })
+
+    if (!task) {
+      return { error: { code: 'NOT_FOUND', message: 'Task not found' } }
+    }
+
+    const recommendation = await findBestAgent(params.id)
+
+    return {
+      taskId: params.id,
+      taskTitle: task.title,
+      recommendation
+    }
+  })
+  // Get all agents skill overview (for task assignment UI)
+  .get('/agents/overview', async ({ user }) => {
+    if (!user) {
+      return { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }
+    }
+
+    const overview = await getAgentsSkillOverview()
+    return overview
+  })
+  // Auto-assign task to best matching agent
+  .post('/:id/auto-assign', async ({ params, set, user }) => {
+    if (!user || (user.role !== 'admin' && user.role !== 'tech_lead' && !hasPermission(user, 'tasks.assign'))) {
+      set.status = 403
+      return { error: { code: 'FORBIDDEN', message: 'Permission denied' } }
+    }
+
+    const task = await prisma.task.findUnique({ where: { id: params.id } })
+    if (!task) {
+      set.status = 404
+      return { error: { code: 'NOT_FOUND', message: 'Task not found' } }
+    }
+
+    // For in_progress tasks with agent, don't allow reassignment
+    if (task.assigneeId && task.status === 'in_progress') {
+      set.status = 400
+      return { error: { code: 'BAD_REQUEST', message: '任務正在進行中，請先在 Agent 監控中中止任務' } }
+    }
+
+    const recommendation = await findBestAgent(params.id)
+    if (!recommendation) {
+      set.status = 400
+      return { error: { code: 'BAD_REQUEST', message: '找不到擅長此任務的 Agent' } }
+    }
+
+    // Assign task to the recommended agent
+    const updatedTask = await prisma.task.update({
+      where: { id: params.id },
+      data: {
+        assigneeId: recommendation.agent.id,
+        status: 'in_progress'
+      },
+      include: {
+        assignee: { select: { id: true, name: true, isAgent: true } },
+        project: { select: { id: true, name: true } }
+      }
+    })
+
+    // Execute task automatically (non-blocking)
+    executeTask(params.id).then(result => {
+      if (result.success) {
+        console.log(`Task ${params.id} completed automatically`)
+      } else {
+        console.error(`Task ${params.id} execution failed:`, result.error)
+      }
+    }).catch(err => {
+      console.error(`Task ${params.id} execution error:`, err)
+    })
+
+    return {
+      task: updatedTask,
+      recommendation,
+      message: '任務已分配，AI 正在處理中...'
+    }
   })
 
 export { taskRoutes }

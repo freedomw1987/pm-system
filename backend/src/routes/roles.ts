@@ -17,6 +17,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'tasks.edit', name: '任務編輯', category: '任務管理' },
   { key: 'tasks.delete', name: '任務刪除', category: '任務管理' },
   { key: 'tasks.assign', name: '任務分配', category: '任務管理' },
+  { key: 'tasks.claim', name: '任務認領', category: '任務管理' },
 
   { key: 'bugs.view', name: '缺陷視圖', category: '缺陷管理' },
   { key: 'bugs.create', name: '缺陷創建', category: '缺陷管理' },
@@ -43,6 +44,14 @@ const DEFAULT_PERMISSIONS = [
   { key: 'roles.create', name: '角色創建', category: '角色權限' },
   { key: 'roles.edit', name: '角色編輯', category: '角色權限' },
   { key: 'roles.delete', name: '角色刪除', category: '角色權限' },
+
+  { key: 'agents.view', name: 'Agent 視圖', category: 'Agent 管理' },
+  { key: 'agents.create', name: 'Agent 創建', category: 'Agent 管理' },
+  { key: 'agents.edit', name: 'Agent 編輯', category: 'Agent 管理' },
+  { key: 'agents.delete', name: 'Agent 刪除', category: 'Agent 管理' },
+
+  { key: 'tokenlogs.view', name: 'Token 日誌視圖', category: 'Token 管理' },
+  { key: 'tokenlogs.create', name: 'Token 日誌創建', category: 'Token 管理' },
 ]
 
 const allPermissions = DEFAULT_PERMISSIONS.map((permission) => permission.key)

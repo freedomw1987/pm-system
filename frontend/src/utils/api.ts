@@ -123,6 +123,13 @@ export const taskApi = {
   updateStatus: (id: string, status: string) =>
     api.put(`/tasks/${id}`, { status }),
   delete: (id: string) => api.delete(`/tasks/${id}`),
+  // Smart task assignment
+  getRecommendation: (taskId: string) =>
+    api.get(`/tasks/${taskId}/recommend-agent`),
+  getAgentsOverview: () =>
+    api.get('/tasks/agents/overview'),
+  autoAssign: (taskId: string) =>
+    api.post(`/tasks/${taskId}/auto-assign`)
 }
 
 // Bug API
@@ -190,4 +197,59 @@ export const documentApi = {
     api.post('/documents/parse', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+}
+
+// Agent API
+export const agentApi = {
+  list: () => api.get('/agents'),
+  get: (id: string) => api.get(`/agents/${id}`),
+  create: (data: { email: string; name: string; password: string; role?: string; agentConfig?: any }) =>
+    api.post('/agents', data),
+  update: (id: string, data: { name?: string; role?: string; agentConfig?: any }) =>
+    api.put(`/agents/${id}`, data),
+  delete: (id: string) => api.delete(`/agents/${id}`),
+  getStats: (id: string) => api.get(`/agents/${id}/stats`),
+  getTasks: (id: string, status?: string) => api.get(`/agents/${id}/tasks`, { params: { status } }),
+  getAvailableTasks: (projectId?: string, limit?: number) =>
+    api.get('/agents/available-tasks', { params: { projectId, limit } }),
+  claimTask: (taskId: string) => api.post('/agents/claim-task', { taskId }),
+  releaseTask: (taskId: string) => api.post('/agents/release-task', { taskId }),
+}
+
+// Token Log API
+export const tokenLogApi = {
+  list: (params?: { userId?: string; taskId?: string; startDate?: string; endDate?: string; agentsOnly?: boolean; limit?: number }) =>
+    api.get('/token-logs', { params }),
+  create: (data: { taskId?: string; tokensUsed: number; inputTokens?: number; outputTokens?: number; model: string; costUSD?: number; description?: string; date?: string }) =>
+    api.post('/token-logs', data),
+  getStatsByModel: (params?: { userId?: string; startDate?: string; endDate?: string }) =>
+    api.get('/token-logs/stats/by-model', { params }),
+  getStatsByAgent: (params?: { startDate?: string; endDate?: string }) =>
+    api.get('/token-logs/stats/by-agent', { params }),
+}
+
+// LLM Config API
+export const llmConfigApi = {
+  get: () => api.get('/llm-config'),
+  update: (data: { apiUrl: string; apiKey?: string; model: string }) =>
+    api.put('/llm-config', data),
+}
+
+// Agent Management API (admin dashboard / PM monitoring)
+export const agentManagementApi = {
+  getConnected: () => api.get('/agent-management/connected'),
+  sendMessage: (agentId: string, message: any) =>
+    api.post('/agent-management/send-message', { agentId, message }),
+  assignTask: (agentId: string, taskId: string) =>
+    api.post('/agent-management/assign-task', { agentId, taskId }),
+  getLogs: (agentId: string) =>
+    api.get(`/agent-management/${agentId}/logs`),
+  intervene: (agentId: string, taskId: string, instruction: string) =>
+    api.post('/agent-management/intervene', { agentId, taskId, instruction }),
+  pause: (agentId: string, taskId: string) =>
+    api.post('/agent-management/pause', { agentId, taskId }),
+  resume: (agentId: string, taskId: string) =>
+    api.post('/agent-management/resume', { agentId, taskId }),
+  disconnect: (agentId: string) =>
+    api.post('/agent-management/disconnect', { agentId }),
 }

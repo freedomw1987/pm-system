@@ -22,6 +22,25 @@ async function main() {
     { email: 'tester@test.com', name: '測試人員', password: 'test123', role: 'tester' },
   ]
 
+  // Seed a sample AI agent
+  const agentUser = await prisma.user.upsert({
+    where: { email: 'agent-dev1@test.com' },
+    update: { role: 'developer', name: 'AI 開發助手', isAgent: true },
+    create: {
+      email: 'agent-dev1@test.com',
+      name: 'AI 開發助手',
+      passwordHash: await bcrypt.hash('agent123', 10),
+      role: 'developer',
+      isAgent: true,
+      agentConfig: {
+        model: 'gpt-4o-mini',
+        maxConcurrentTasks: 3,
+        personality: 'proactive'
+      }
+    },
+  })
+  console.log(`Created/updated agent: ${agentUser.email} (isAgent=${agentUser.isAgent})`)
+
   // Lookup map: email -> user record after upsert
   const userByEmail: Record<string, any> = {}
   for (const u of builtInUsers) {

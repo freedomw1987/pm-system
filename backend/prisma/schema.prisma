@@ -15,6 +15,18 @@ model User {
   name         String
   role         String   @default("developer") // admin, pm, tech_lead, developer, tester
   passwordHash String   @map("password_hash")
+  isAgent      Boolean  @default(false) @map("is_agent")
+  agentConfig  Json?    @map("agent_config")
+  // agentConfig structure:
+  // {
+  //   "model": "gpt-4o-mini",
+  //   "maxConcurrentTasks": 3,
+  //   "systemPrompt": "你是專業的代碼審查員...",
+  //   "skills": ["code_review", "testing", "documentation"],
+  //   "mcpServers": ["github", "jira"],
+  //   "temperature": 0.7,
+  //   "topP": 1.0
+  // }
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -30,6 +42,7 @@ model User {
   refreshTokens       RefreshToken[]
   createdWikiPages    WikiPage[]
   chatSessions       ChatSession[]
+  tokenLogs          TokenLog[]
 
   @@map("users")
 }
@@ -168,15 +181,16 @@ model Requirement {
 }
 
 model Task {
-  id             String   @id @default(uuid())
-  projectId      String   @map("project_id")
-  title          String
-  description    String?
-  assigneeId     String?  @map("assignee_id")
-  status         String   @default("pending") // pending, in_progress, completed
-  estimatedHours Decimal? @map("estimated_hours")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id              String    @id @default(uuid())
+  projectId       String    @map("project_id")
+  title           String
+  description     String?
+  assigneeId      String?   @map("assignee_id")
+  status          String    @default("pending") // pending, in_progress, completed
+  estimatedHours  Decimal?  @map("estimated_hours")
+  claimedByAgentAt DateTime? @map("claimed_by_agent_at") // When an agent self-claimed
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   // Relations
   project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -184,6 +198,7 @@ model Task {
   requirements TaskRequirement[]
   bugs         Bug[]
   workLogs     WorkLog[]
+  tokenLogs    TokenLog[]
 
   @@map("tasks")
 }
@@ -240,6 +255,26 @@ model WorkLog {
   bug  Bug?  @relation(fields: [bugId], references: [id], onDelete: Cascade)
 
   @@map("work_logs")
+}
+
+model TokenLog {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  taskId       String?  @map("task_id")
+  tokensUsed   Int      @map("tokens_used")
+  inputTokens  Int?     @map("input_tokens")
+  outputTokens Int?     @map("output_tokens")
+  model        String   // e.g. "gpt-4o-mini"
+  costUSD      Decimal? @db.Decimal(8, 6)
+  date         DateTime @map("work_date")
+  description  String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@map("token_logs")
 }
 
 model Attachment {

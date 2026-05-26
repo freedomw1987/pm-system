@@ -16,6 +16,9 @@ import wikiRoutes from './routes/wikis'
 import { llmConfigRoutes } from './routes/llm-config'
 import { documentRoutes } from './routes/documents'
 import { chatRoutes } from './routes/chat'
+import { agentRoutes } from './routes/agents'
+import { tokenLogRoutes } from './routes/tokenlogs'
+import { agentWebSocketRoutes, agentManagementRoutes, agentHealthRoutes } from './agent/runtime'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
@@ -89,7 +92,23 @@ const app = new Elysia()
 
         // Load permissions for this role from cache/DB
         const permissions = role ? await loadRolePermissions(role) : []
-        return { user: { id: userId, role: role || 'developer', permissions } }
+
+        // Load agent info if applicable
+        const prisma = getPrisma()
+        const dbUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { isAgent: true, agentConfig: true }
+        })
+
+        return {
+          user: {
+            id: userId,
+            role: role || 'developer',
+            permissions,
+            isAgent: dbUser?.isAgent ?? false,
+            agentConfig: dbUser?.agentConfig ?? null
+          }
+        }
       } catch {
         return { user: null }
       }
@@ -107,7 +126,13 @@ const app = new Elysia()
     .use(llmConfigRoutes)
     .use(documentRoutes)
     .use(chatRoutes)
+    .use(agentRoutes)
+    .use(tokenLogRoutes)
+    .use(agentManagementRoutes)
+    .use(agentHealthRoutes)
   )
+  // WebSocket endpoint for agents
+  .use(agentWebSocketRoutes)
   .listen(4000)
 
 // Warm up cache at startup

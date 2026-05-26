@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
 const settingsNavItems: NavItem[] = [
   { path: '/users', icon: Users, label: '用戶管理', permissions: ['users.view'] },
   { path: '/roles', icon: ShieldCheck, label: '角色權限', permissions: ['roles.view'] },
+  { path: '/agents', icon: Bot, label: 'Agent 管理', permissions: [] }, // Admin always sees this
   { path: '/settings', icon: Settings, label: 'AI 設定', permissions: [], adminOnly: true },
 ]
 
@@ -53,7 +54,7 @@ export default function Layout() {
     return localStorage.getItem('sidebar-collapsed') === 'true'
   })
   const [settingsOpen, setSettingsOpen] = useState(() => {
-    return ['/users', '/roles', '/settings'].some(path =>
+    return ['/users', '/roles', '/settings', '/agents'].some(path =>
       location.pathname === path || location.pathname.startsWith(`${path}/`)
     )
   })

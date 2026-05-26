@@ -13,17 +13,21 @@
 export type Permission =
   | 'projects.view' | 'projects.create' | 'projects.edit' | 'projects.delete'
   | 'requirements.view' | 'requirements.create' | 'requirements.edit' | 'requirements.delete'
-  | 'tasks.view' | 'tasks.create' | 'tasks.edit' | 'tasks.delete' | 'tasks.assign'
+  | 'tasks.view' | 'tasks.create' | 'tasks.edit' | 'tasks.delete' | 'tasks.assign' | 'tasks.claim'
   | 'bugs.view' | 'bugs.create' | 'bugs.edit' | 'bugs.delete' | 'bugs.resolve'
   | 'worklogs.view' | 'worklogs.create' | 'worklogs.edit' | 'worklogs.delete' | 'worklogs.export'
   | 'reports.view' | 'reports.export'
   | 'users.view' | 'users.create' | 'users.edit' | 'users.delete' | 'users.assign_roles'
   | 'roles.view' | 'roles.create' | 'roles.edit' | 'roles.delete'
+  | 'agents.view' | 'agents.create' | 'agents.edit' | 'agents.delete'
+  | 'tokenlogs.view' | 'tokenlogs.create'
 
 export interface AuthUser {
   id: string
   role: string
   permissions?: string[]
+  isAgent?: boolean
+  agentConfig?: any
 }
 
 /**

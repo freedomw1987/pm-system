@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { CheckCircle, Clock, ListTodo, PlayCircle } from 'lucide-react'
+import { CheckCircle, Clock, ListTodo, PlayCircle, Bot } from 'lucide-react'
 import { taskApi, workLogApi } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import type { Task } from '../types'
@@ -198,7 +198,16 @@ export default function MyTasksPage() {
                           {task.title}
                         </h3>
                         {task.assignee && (
-                          <p className="text-xs text-gray-400 mt-1">負責人：{task.assignee.name}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            {task.assignee.isAgent ? (
+                              <span className="flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
+                                <Bot size={12} />
+                                {task.assignee.name}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">負責人：{task.assignee.name}</span>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

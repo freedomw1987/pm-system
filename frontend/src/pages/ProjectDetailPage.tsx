@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip } from 'lucide-react'
+import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw } from 'lucide-react'
 import { projectApi, requirementApi, userApi, roleApi } from '../utils/api'
 import type { Project, Requirement, User, ProjectMember, Role } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
 import WikiTab from '../components/WikiTab'
 import AttachmentsTab from '../components/AttachmentsTab'
+import ProjectKanban from '../components/ProjectKanban'
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
   const [project, setProject] = useState<Project | null>(null)
   const [requirements, setRequirements] = useState<Requirement[]>([])
-  const [activeTab, setActiveTab] = useState<'requirements' | 'members' | 'wiki' | 'attachments'>('requirements')
+  const [activeTab, setActiveTab] = useState<'requirements' | 'kanban' | 'members' | 'wiki' | 'attachments' | 'agents'>('requirements')
   const [isLoading, setIsLoading] = useState(true)
 
   // ── Add member ────────────────────────────────────────────────
@@ -218,6 +219,11 @@ export default function ProjectDetailPage() {
 
   return (
     <div>
+      {/* Agent Activity Banner - Always visible for PM/Admin */}
+      {(user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead') && (
+        <AgentActivityBanner projectId={id!} />
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 lg:mb-8">
         <Link to="/" className="p-2 hover:bg-gray-200 rounded-lg transition-colors self-start">
           <ArrowLeft size={24} />
@@ -234,6 +240,9 @@ export default function ProjectDetailPage() {
         <button onClick={() => setActiveTab('requirements')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'requirements' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <FileText size={18} className="inline mr-2" />需求 ({requirements.length})
         </button>
+        <button onClick={() => setActiveTab('kanban')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'kanban' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
+          <LayoutGrid size={18} className="inline mr-2" />看板
+        </button>
         <button onClick={() => setActiveTab('members')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'members' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <Users size={18} className="inline mr-2" />成員 ({project.members?.length || 0})
         </button>
@@ -243,6 +252,11 @@ export default function ProjectDetailPage() {
         <button onClick={() => setActiveTab('attachments')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'attachments' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <Paperclip size={18} className="inline mr-2" />附件
         </button>
+        {(user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead') && (
+          <button onClick={() => setActiveTab('agents')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'agents' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
+            <Bot size={18} className="inline mr-2" />Agent 任務
+          </button>
+        )}
       </div>
 
       {/* Requirements Tab */}
@@ -293,6 +307,11 @@ export default function ProjectDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Kanban Tab */}
+      {activeTab === 'kanban' && (
+        <ProjectKanban projectId={id!} />
       )}
 
       {/* Members Tab */}
@@ -361,6 +380,29 @@ export default function ProjectDetailPage() {
       {/* Attachments Tab */}
       {activeTab === 'attachments' && (
         <AttachmentsTab projectId={id!} />
+      )}
+
+      {/* Agent Monitoring Tab */}
+      {activeTab === 'agents' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Agent Task List */}
+          <div className="lg:col-span-3">
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-4 border-b flex items-center justify-between">
+                <h2 className="font-semibold flex items-center gap-2">
+                  <Bot className="w-5 h-5 text-purple-600" />
+                  AI Agent 任務列表
+                </h2>
+                <button onClick={() => { window.location.reload() }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="刷新">
+                  <RefreshCw size={16} />
+                </button>
+              </div>
+
+              {/* Show project tasks assigned to agents */}
+              <AgentTasksList projectId={id!} />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add Member Modal */}
@@ -469,6 +511,169 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Agent Activity Banner Component ─────────────────────────────
+interface TaskInfo {
+  id: string
+  title: string
+  status: string
+  assignee?: { id: string; name: string }
+}
+
+function AgentActivityBanner({ projectId }: { projectId: string }) {
+  const [inProgressTasks, setInProgressTasks] = useState<TaskInfo[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const loadAgentTasks = async () => {
+    try {
+      const res = await fetch(`/api/tasks?projectId=${projectId}&status=in_progress`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` }
+      })
+      const data = await res.json()
+      const agentTasks = (data.tasks || []).filter((t: TaskInfo) => t.assignee?.name?.includes('Agent') || t.assignee?.name?.includes('AI'))
+      setInProgressTasks(agentTasks)
+    } catch (err) {
+      console.error('Failed to load agent tasks:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAgentTasks()
+    const interval = setInterval(loadAgentTasks, 10000) // Refresh every 10 seconds
+    return () => clearInterval(interval)
+  }, [projectId])
+
+  if (loading) return null
+
+  if (inProgressTasks.length === 0) {
+    return (
+      <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+        <Bot className="w-5 h-5 text-gray-400" />
+        <span className="text-sm text-gray-500">目前沒有 AI Agent 在處理任務</span>
+        <span className="text-xs text-gray-400 ml-auto">點擊需求詳情頁的 🤖 按鈕派發任務</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+      <div className="flex items-center gap-2 mb-2">
+        <Activity className="w-5 h-5 text-purple-600 animate-pulse" />
+        <span className="font-medium text-purple-900">AI Agent 正在工作</span>
+        <span className="text-xs text-purple-600 bg-purple-100 px-2 py-0.5 rounded ml-2">{inProgressTasks.length} 個任務</span>
+      </div>
+      <div className="space-y-1">
+        {inProgressTasks.map(task => (
+          <div key={task.id} className="flex items-center gap-2 text-sm">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+            <span className="text-gray-700 truncate flex-1">{task.title}</span>
+            <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded">{task.assignee?.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Agent Tasks List Component ─────────────────────────────────────
+interface AgentTask {
+  id: string
+  title: string
+  description?: string
+  status: string
+  assignee?: { id: string; name: string; isAgent?: boolean }
+  createdAt: string
+}
+
+function AgentTasksList({ projectId }: { projectId: string }) {
+  const [tasks, setTasks] = useState<AgentTask[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const loadTasks = async () => {
+    try {
+      const res = await fetch(`/api/tasks?projectId=${projectId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` }
+      })
+      const data = await res.json()
+      // Filter to show only tasks assigned to agents
+      const agentTasks = (data.tasks || []).filter((t: AgentTask) =>
+        t.assignee?.name?.includes('Agent') || t.assignee?.name?.includes('AI')
+      )
+      setTasks(agentTasks)
+    } catch (err) {
+      console.error('Failed to load tasks:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadTasks()
+    const interval = setInterval(loadTasks, 5000) // Refresh every 5 seconds
+    return () => clearInterval(interval)
+  }, [projectId])
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded">待處理</span>
+      case 'in_progress':
+        return <span className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded flex items-center gap-1">
+          <Activity className="w-3 h-3 animate-pulse" />處理中
+        </span>
+      case 'completed':
+        return <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">已完成</span>
+      default:
+        return <span className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded">{status}</span>
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center">
+        <div className="animate-spin w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full mx-auto"></div>
+        <p className="text-gray-500 mt-2">載入中...</p>
+      </div>
+    )
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="p-8 text-center">
+        <Bot className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+        <h3 className="font-medium text-gray-600">暫無 Agent 任務</h3>
+        <p className="text-gray-400 text-sm mt-1">在需求詳情頁點擊 🤖 按鈕派發任務</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="divide-y divide-gray-100">
+      {tasks.map(task => (
+        <div key={task.id} className="p-4 hover:bg-gray-50 transition-colors">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Bot className="w-4 h-4 text-purple-600" />
+                <h4 className="font-medium text-gray-900 truncate">{task.title}</h4>
+                {getStatusBadge(task.status)}
+              </div>
+              {task.description && (
+                <p className="text-sm text-gray-500 truncate">{task.description.replace(/<[^>]*>/g, '')}</p>
+              )}
+              <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                <span>負責人：{task.assignee?.name}</span>
+                <span>建立時間：{new Date(task.createdAt).toLocaleString('zh-TW')}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
