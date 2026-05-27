@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Clock, Plus, Calendar, Edit2, Trash2, X, Check, Download } from 'lucide-react'
-import { workLogApi, projectApi, taskApi, bugApi, userApi } from '../utils/api'
+import { workLogApi, projectApi, taskApi, bugApi, userApi, departmentApi } from '../utils/api'
 import type { WorkLog } from '../types'
 import * as XLSX from 'xlsx'
 
 interface ProjectOption { id: string; name: string }
 interface TaskOption { id: string; title: string; requirementTitle?: string }
 interface BugOption { id: string; title: string; requirementTitle?: string }
+interface DepartmentOption { id: string; name: string }
 
 export default function WorkLogsPage() {
   const [workLogs, setWorkLogs] = useState<WorkLog[]>([])
@@ -18,7 +19,9 @@ export default function WorkLogsPage() {
   // Filter state
   const [filterProject, setFilterProject] = useState('')
   const [filterUser, setFilterUser] = useState('')
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([])
+  const [filterDepartment, setFilterDepartment] = useState('')
+  const [users, setUsers] = useState<{ id: string; name: string; departmentId?: string }[]>([])
+  const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [filteredLogs, setFilteredLogs] = useState<WorkLog[]>([])
   const [formData, setFormData] = useState({
     projectId: '',
@@ -37,6 +40,7 @@ export default function WorkLogsPage() {
   useEffect(() => {
     loadProjects()
     loadUsers()
+    loadDepartments()
     loadData()
   }, [])
 
@@ -51,8 +55,14 @@ export default function WorkLogsPage() {
     if (filterUser) {
       result = result.filter(log => log.user?.id === filterUser)
     }
+    if (filterDepartment) {
+      result = result.filter(log =>
+        (log.user as any)?.department?.id === filterDepartment ||
+        (log.user as any)?.departmentId === filterDepartment
+      )
+    }
     setFilteredLogs(result)
-  }, [workLogs, filterProject, filterUser])
+  }, [workLogs, filterProject, filterUser, filterDepartment])
 
   const loadProjects = async () => {
     try {
@@ -69,6 +79,15 @@ export default function WorkLogsPage() {
       setUsers(res.data.users || [])
     } catch (err) {
       console.error('Failed to load users:', err)
+    }
+  }
+
+  const loadDepartments = async () => {
+    try {
+      const res = await departmentApi.list()
+      setDepartments(res.data.departments || [])
+    } catch (err) {
+      console.error('Failed to load departments:', err)
     }
   }
 
@@ -255,7 +274,7 @@ export default function WorkLogsPage() {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
         <select
           value={filterProject}
           onChange={(e) => setFilterProject(e.target.value)}
@@ -264,6 +283,16 @@ export default function WorkLogsPage() {
           <option value="">全部項目</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        <select
+          value={filterDepartment}
+          onChange={(e) => setFilterDepartment(e.target.value)}
+          className="input-field text-sm"
+        >
+          <option value="">全部部門</option>
+          {departments.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
         <select

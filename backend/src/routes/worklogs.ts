@@ -44,7 +44,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
     const workLogs = await prisma.workLog.findMany({
       where,
       include: {
-        user: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, department: { select: { id: true, name: true } } } },
         task: { select: { id: true, title: true, project: { select: { id: true, name: true } } } },
         bug: { select: { id: true, title: true, project: { select: { id: true, name: true } } } }
       },
@@ -94,7 +94,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
         description: note
       },
       include: {
-        user: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, department: { select: { id: true, name: true } } } },
         task: { select: { id: true, title: true, project: { select: { id: true, name: true } } } },
         bug: { select: { id: true, title: true, project: { select: { id: true, name: true } } } }
       }
@@ -143,7 +143,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
         description: note
       },
       include: {
-        user: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, department: { select: { id: true, name: true } } } },
         task: { select: { id: true, title: true, project: { select: { id: true, name: true } } } },
         bug: { select: { id: true, title: true, project: { select: { id: true, name: true } } } }
       }
