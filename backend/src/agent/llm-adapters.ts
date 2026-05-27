@@ -453,7 +453,6 @@ export function supportsVisionForFile(model: string, mimeType: string | undefine
   return false
 }
 
-// Import path and truncateText from documents.ts
 import * as path from 'path'
 
 const MAX_PROMPT_TEXT_LENGTH = 60_000

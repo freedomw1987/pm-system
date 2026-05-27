@@ -62,10 +62,10 @@ export const authApi = {
 export const userApi = {
   list: () => api.get('/users'),
   listSimple: () => api.get('/users/list'),
-  create: (data: { email: string; name: string; password: string; role?: string }) =>
+  create: (data: { email: string; name: string; password: string; role?: string; departmentId?: string }) =>
     api.post('/users', data),
   get: (id: string) => api.get(`/users/${id}`),
-  update: (id: string, data: { name?: string; email?: string; password?: string; role?: string }) =>
+  update: (id: string, data: { name?: string; email?: string; password?: string; role?: string; departmentId?: string | null }) =>
     api.put(`/users/${id}`, data),
   delete: (id: string) => api.delete(`/users/${id}`),
 }
@@ -79,6 +79,14 @@ export const roleApi = {
     api.put(`/roles/${id}`, data),
   delete: (id: string) => api.delete(`/roles/${id}`),
   permissions: () => api.get('/permissions'),
+}
+
+// Department API
+export const departmentApi = {
+  list: () => api.get('/departments'),
+  create: (data: { name: string }) => api.post('/departments', data),
+  update: (id: string, data: { name?: string }) => api.put(`/departments/${id}`, data),
+  delete: (id: string) => api.delete(`/departments/${id}`),
 }
 
 // Project API

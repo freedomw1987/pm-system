@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Users, Trash2, UserPlus, Pencil, Upload, X, CheckCircle, AlertCircle } from 'lucide-react'
-import { userApi, roleApi } from '../utils/api'
-import type { User, Role } from '../types'
+import { userApi, roleApi, departmentApi } from '../utils/api'
+import type { User, Role, Department } from '../types'
 
 interface BatchResult {
   email: string
@@ -16,25 +16,28 @@ export default function UsersPage() {
   const [showForm, setShowForm] = useState(false)
   const [showBatchForm, setShowBatchForm] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
-  const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'developer' as string })
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', role: 'developer', departmentId: '' as string })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableRoles, setAvailableRoles] = useState<Role[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
   const [batchData, setBatchData] = useState('')
   const [batchResults, setBatchResults] = useState<BatchResult[]>([])
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
-  const [batchPreview, setBatchPreview] = useState<{ name: string; email: string; role: string; password: string }[]>([])
+  const [batchPreview, setBatchPreview] = useState<{ name: string; email: string; role: string; password: string; department: string }[]>([])
 
   useEffect(() => { loadUsers() }, [])
 
   const loadUsers = async () => {
     setIsLoading(true)
     try {
-      const [usersRes, rolesRes] = await Promise.all([
+      const [usersRes, rolesRes, deptsRes] = await Promise.all([
         userApi.list(),
         roleApi.list(),
+        departmentApi.list(),
       ])
       setUsers(usersRes.data.users)
       setAvailableRoles(rolesRes.data.roles)
+      setDepartments(deptsRes.data.departments)
     } catch (err) {
       console.error('Failed to load users:', err)
     } finally {
@@ -49,7 +52,13 @@ export default function UsersPage() {
 
   const handleEdit = (user: User) => {
     setEditingUser(user)
-    setFormData({ name: user.name, email: user.email, password: '', role: user.role || 'developer' })
+    setFormData({
+      name: user.name,
+      email: user.email,
+      password: '',
+      role: user.role || 'developer',
+      departmentId: user.departmentId || ''
+    })
     setShowForm(true)
   }
 
@@ -57,21 +66,26 @@ export default function UsersPage() {
     e.preventDefault()
     setIsSubmitting(true)
     try {
+      const data: any = { name: formData.name, email: formData.email }
+      if (formData.password) data.password = formData.password
+      data.role = formData.role
+      data.departmentId = formData.departmentId || null
+
       if (editingUser) {
-        const data: any = { name: formData.name, email: formData.email }
-        if (formData.password) data.password = formData.password
-        data.role = formData.role  // always send role on edit
         await userApi.update(editingUser.id, data)
       } else {
-        await userApi.create({ email: formData.email, name: formData.name, password: formData.password, role: formData.role })
+        await userApi.create({ email: formData.email, name: formData.name, password: formData.password, role: formData.role, departmentId: formData.departmentId || undefined })
       }
-      setShowForm(false); setEditingUser(null); setFormData({ name: '', email: '', password: '', role: 'developer' }); loadUsers()
+      setShowForm(false)
+      setEditingUser(null)
+      setFormData({ name: '', email: '', password: '', role: 'developer', departmentId: '' })
+      loadUsers()
     } catch (err) { console.error(err) } finally { setIsSubmitting(false) }
   }
 
   const openCreate = () => {
     setEditingUser(null)
-    setFormData({ name: '', email: '', password: '', role: 'developer' })
+    setFormData({ name: '', email: '', password: '', role: 'developer', departmentId: '' })
     setShowForm(true)
   }
 
@@ -84,10 +98,10 @@ export default function UsersPage() {
 
   const generatePassword = () => Math.random().toString(36).slice(-8)
 
-  // Parse batch data for preview
+  // Parse batch data for preview (now includes department as 5th column)
   const parseBatchData = (data: string) => {
     const lines = data.trim().split('\n')
-    const preview: { name: string; email: string; role: string; password: string }[] = []
+    const preview: { name: string; email: string; role: string; password: string; department: string }[] = []
     for (const line of lines) {
       if (!line.trim()) continue
       const cols = line.split('\t')
@@ -95,7 +109,8 @@ export default function UsersPage() {
         name: cols[0]?.trim() || '',
         email: cols[1]?.trim() || '',
         role: cols[2]?.trim() || 'developer',
-        password: cols[3]?.trim() || '(自動生成)'
+        password: cols[3]?.trim() || '(自動生成)',
+        department: cols[4]?.trim() || '(未指定)',
       })
     }
     return preview
@@ -108,6 +123,12 @@ export default function UsersPage() {
     setIsBatchSubmitting(true)
     setBatchResults([])
 
+    // Build department name→id lookup
+    const deptNameToId: Record<string, string> = {}
+    for (const d of departments) {
+      deptNameToId[d.name] = d.id
+    }
+
     const lines = batchData.trim().split('\n')
     const results: BatchResult[] = []
 
@@ -119,20 +140,22 @@ export default function UsersPage() {
       const email = cols[1]?.trim()
       const role = cols[2]?.trim() || 'developer'
       const password = cols[3]?.trim() || generatePassword()
+      const deptName = cols[4]?.trim()
 
       if (!name || !email) {
         results.push({ name: name || '(無姓名)', email: email || '(無電郵)', success: false, error: '姓名和電郵為必填' })
         continue
       }
 
-      // Validate email format
       if (!email.includes('@')) {
         results.push({ name, email, success: false, error: '電郵格式無效' })
         continue
       }
 
+      const departmentId = deptName ? (deptNameToId[deptName] || null) : null
+
       try {
-        await userApi.create({ name, email, password, role })
+        await userApi.create({ name, email, password, role, departmentId: departmentId || undefined })
         results.push({ name, email, success: true })
       } catch (err: any) {
         const msg = err?.response?.data?.error?.message || '創建失敗'
@@ -156,7 +179,7 @@ export default function UsersPage() {
   }
   const roleLabel = (r?: string) => {
     if (!r) return '-'
-    return BUILT_IN_LABELS[r] || r // show name if custom role (not in built-in map)
+    return BUILT_IN_LABELS[r] || r
   }
   const projectRoleLabel = (r: string) => ({ pm: '項目經理', tech_lead: '技術主管', developer: '開發', tester: '測試' }[r] || r)
 
@@ -197,6 +220,11 @@ export default function UsersPage() {
                   <div>
                     <p className="font-semibold text-gray-900 text-lg">{user.name}</p>
                     <p className="text-gray-500 text-sm">{user.email}</p>
+                    {user.department && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 mt-1">
+                        {user.department.name}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -253,6 +281,19 @@ export default function UsersPage() {
                 <input type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} className="input-field" minLength={6} {...(editingUser ? {} : { required: true })} />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">部門</label>
+                <select
+                  value={formData.departmentId}
+                  onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
+                  className="input-field"
+                >
+                  <option value="">— 未指定 —</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">全局角色 *</label>
                 <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="input-field">
                   {availableRoles.map((r) => (
@@ -284,9 +325,9 @@ export default function UsersPage() {
 
             <div className="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
               <p className="font-medium text-blue-800 mb-1">📋 Excel 格式說明</p>
-              <p className="text-blue-700">直接從 Excel 複製貼上即可。</p>
-              <p className="text-blue-700 mt-1">格式：<span className="font-mono bg-blue-100 px-1">姓名</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">電郵</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">角色</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">密碼(可留空)</span></p>
-              <p className="text-blue-600 mt-1">角色可選：admin, pm, tech_lead, developer, tester</p>
+              <p className="text-blue-700">直接從 Excel 複製貼上即可，支援 5 欄：</p>
+              <p className="text-blue-700 mt-1">格式：<span className="font-mono bg-blue-100 px-1">姓名</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">電郵</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">角色</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">密碼(可留空)</span> <span className="text-blue-400">tab</span> <span className="font-mono bg-blue-100 px-1">部門(可留空)</span></p>
+              <p className="text-blue-600 mt-1">角色：admin, pm, tech_lead, developer, tester｜部門名稱需與系統中一致</p>
             </div>
 
             <form onSubmit={handleBatchSubmit} className="flex-1 flex flex-col">
@@ -297,9 +338,9 @@ export default function UsersPage() {
                     setBatchData(e.target.value)
                     setBatchPreview(parseBatchData(e.target.value))
                   }}
-                  placeholder="張三	zhangsan@example.com	developer	pass123
-李四	lisi@example.com	pm
-王五	wangwu@example.com	developer"
+                  placeholder="張三	zhangsan@example.com	developer	pass123	研發部
+李四	lisi@example.com	pm		產品部
+王五	wangwu@example.com	developer		"
                   className="w-full h-48 p-3 border rounded-lg font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -317,6 +358,7 @@ export default function UsersPage() {
                         <th className="p-2 font-medium">電郵</th>
                         <th className="p-2 font-medium">角色</th>
                         <th className="p-2 font-medium">密碼</th>
+                        <th className="p-2 font-medium">部門</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -337,6 +379,7 @@ export default function UsersPage() {
                             </span>
                           </td>
                           <td className="p-2 text-gray-400 text-xs">{row.password}</td>
+                          <td className="p-2 text-gray-600 text-xs">{row.department}</td>
                         </tr>
                       ))}
                     </tbody>

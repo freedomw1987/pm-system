@@ -12,6 +12,7 @@ import { workLogRoutes } from './routes/worklogs'
 import { reportRoutes } from './routes/reports'
 import { attachmentRoutes } from './routes/attachments'
 import { roleRoutes } from './routes/roles'
+import { departmentRoutes } from './routes/departments'
 import wikiRoutes from './routes/wikis'
 import { llmConfigRoutes } from './routes/llm-config'
 import { documentRoutes } from './routes/documents'
@@ -128,6 +129,7 @@ const app = new Elysia()
     .use(reportRoutes)
     .use(attachmentRoutes)
     .use(roleRoutes)
+    .use(departmentRoutes)
     .use(wikiRoutes)
     .use(llmConfigRoutes)
     .use(documentRoutes)

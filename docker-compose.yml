@@ -13,6 +13,12 @@ services:
       - "8080:80"
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   backend:
     build:
@@ -27,6 +33,12 @@ services:
       DATABASE_URL: postgresql://pmuser:pmpassword@db:5432/pmdb
       JWT_SECRET: dev-secret-key
       FRONTEND_URL: http://localhost
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4000/api/projects || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     command: sh -c "bunx prisma db push --accept-data-loss && bunx prisma db seed && bun src/index.ts"
 
   db:

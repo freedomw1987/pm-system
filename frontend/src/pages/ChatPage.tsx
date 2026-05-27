@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -73,26 +73,159 @@ function ToolActivityList({ activities }: { activities?: ToolActivity[] }) {
   )
 }
 
+// Extracts chart config from HTML blocks
+function parseChartConfig(html: string): { canvasId: string; config: any }[] {
+  const charts: { canvasId: string; config: any }[] = []
+
+  // Match <canvas id="xxx" data-config='{"..."}'>
+  const canvasRegex = /<canvas\s+id="([^"]+)"[^>]*>/gi
+  let match
+
+  while ((match = canvasRegex.exec(html)) !== null) {
+    const canvasId = match[1]
+    const fullMatch = match[0]
+
+    // Try to extract data-config JSON
+    const configMatch = fullMatch.match(/data-config='([^']+)'/)
+    if (configMatch) {
+      try {
+        const config = JSON.parse(configMatch[1])
+        charts.push({ canvasId, config })
+        continue
+      } catch {}
+    }
+
+    // Fallback: extract config from new Chart() in script after canvas
+    const afterCanvas = html.slice(match.index + match[0].length, match.index + match[0].length + 2000)
+    const scriptMatch = afterCanvas.match(/<script[^>]*>\s*new\s+Chart\s*\(\s*[^,]*,\s*({[\s\S]*?})\s*\)\s*;?\s*<\/script>/i)
+    if (scriptMatch) {
+      try {
+        const fixed = scriptMatch[1]
+          .replace(/([{,]\s*)(\w+)(\s*):/g, '$1"$2"$3:')
+          .replace(/:\s*'([^']*)'/g, ': "$1"')
+        const config = JSON.parse(fixed)
+        charts.push({ canvasId, config })
+      } catch (e) {
+        console.log('Chart config parse error:', e)
+      }
+    }
+  }
+
+  return charts
+}
+
+function ChartBlock({ content }: { content: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [chartReady, setChartReady] = useState(false)
+
+  // Parse configs after mount
+  const chartConfigs = useMemo(() => parseChartConfig(content), [content])
+
+  // Load Chart.js CDN once
+  useEffect(() => {
+    if ((window as any).Chart) {
+      setChartReady(true)
+      return
+    }
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js'
+    script.onload = () => setChartReady(true)
+    script.onerror = () => console.error('Failed to load Chart.js')
+    document.head.appendChild(script)
+  }, [])
+
+  // Inject HTML and render charts
+  useEffect(() => {
+    if (!chartReady || !containerRef.current || chartConfigs.length === 0) return
+
+    // Inject HTML via innerHTML
+    containerRef.current.innerHTML = content
+
+    // Wait a tick for DOM to update, then init charts
+    requestAnimationFrame(() => {
+      for (const { canvasId, config } of chartConfigs) {
+        const canvas = document.getElementById(canvasId) as HTMLCanvasElement
+        if (!canvas) continue
+        try {
+          if ((canvas as any)._chart) (canvas as any)._chart.destroy()
+          ;(canvas as any)._chart = new (window as any).Chart(canvas, config)
+        } catch (e) {
+          console.error(`Chart init error [${canvasId}]:`, e)
+        }
+      }
+    })
+  }, [chartReady, chartConfigs, content])
+
+  return <div ref={containerRef} className="my-4 p-4 bg-white rounded-lg border border-gray-200 overflow-x-auto" />
+}
+
 // Process markdown to extract thinking tags and render specially
 function processContent(content: string): React.ReactNode[] {
   const parts: React.ReactNode[] = []
   const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
-  let lastIndex = 0
+  // Support both ```html and 「html formats
+  const htmlBlockRegex = /(?:```html|「html)([\s\S]*?)(?:```|」)/gi
   let match
 
+  // First handle thinking blocks and HTML blocks together
+  const allBlocks: { index: number; length: number; type: 'think' | 'html'; content: string }[] = []
+
+  // Find thinking blocks
   while ((match = thinkRegex.exec(content)) !== null) {
-    // Add text before the think tag
-    if (match.index > lastIndex) {
-      parts.push(content.slice(lastIndex, match.index))
+    allBlocks.push({
+      index: match.index,
+      length: match[0].length,
+      type: 'think',
+      content: match[1].trim()
+    })
+  }
+
+  // Find HTML blocks
+  while ((match = htmlBlockRegex.exec(content)) !== null) {
+    allBlocks.push({
+      index: match.index,
+      length: match[0].length,
+      type: 'html',
+      content: match[1].trim()
+    })
+  }
+
+  // Sort by index
+  allBlocks.sort((a, b) => a.index - b.index)
+
+  // Build result
+  let pos = 0
+  for (const block of allBlocks) {
+    if (block.index > pos) {
+      // Add text before block
+      const textBefore = content.slice(pos, block.index)
+      if (textBefore) {
+        parts.push(textBefore)
+      }
     }
-    // Add the thinking block
-    parts.push(<ThinkingBlock key={`think-${match.index}`} content={match[1].trim()} />)
-    lastIndex = match.index + match[0].length
+
+    if (block.type === 'think') {
+      parts.push(<ThinkingBlock key={`think-${block.index}`} content={block.content} />)
+    } else if (block.type === 'html') {
+      // Decode all HTML entities and escaped characters
+      const htmlContent = block.content
+        .replace(/\\</g, '<')
+        .replace(/\\>/g, '>')
+        .replace(/\\&/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+      parts.push(<ChartBlock key={`html-${block.index}`} content={htmlContent} />)
+    }
+
+    pos = block.index + block.length
   }
 
   // Add remaining text
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex))
+  if (pos < content.length) {
+    parts.push(content.slice(pos))
   }
 
   return parts
@@ -536,7 +669,7 @@ export default function ChatPage() {
                   <>
                     <ToolActivityList activities={msg.toolActivities} />
                     {msg.content ? (
-                      <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-gray-200 prose-code:rounded prose-code:p-1 prose-code:text-xs">
+                      <div className="max-w-none">
                         {processContent(msg.content).map((part, i) =>
                           typeof part === 'string' ? (
                             <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>

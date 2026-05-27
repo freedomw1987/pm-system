@@ -26,6 +26,8 @@ const userRoutes = new Elysia({ prefix: '/users' })
         email: true,
         name: true,
         role: true,
+        departmentId: true,
+        department: { select: { id: true, name: true } },
         createdAt: true,
         projectMemberships: {
           include: {
@@ -42,6 +44,8 @@ const userRoutes = new Elysia({ prefix: '/users' })
         email: u.email,
         name: u.name,
         role: u.role,
+        departmentId: u.departmentId,
+        department: u.department,
         createdAt: u.createdAt,
         projectMemberships: u.projectMemberships.map(m => ({
           projectId: m.project.id,
@@ -58,7 +62,7 @@ const userRoutes = new Elysia({ prefix: '/users' })
       return { error: { code: 'FORBIDDEN', message: "Permission denied: 'users.create' is required" } }
     }
 
-    const { email, name, password, role } = body as { email: string; name: string; password: string; role?: string }
+    const { email, name, password, role, departmentId } = body as { email: string; name: string; password: string; role?: string; departmentId?: string }
 
     const { prisma } = await import('../utils/prisma')
 
@@ -70,7 +74,6 @@ const userRoutes = new Elysia({ prefix: '/users' })
     }
 
     // Validate role if provided — only custom roles need to exist in Role table
-    // (built-in roles like admin/pm/tech_lead/developer/tester/visitor are hardcoded strings)
     const BUILT_IN_ROLES = ['admin', 'pm', 'tech_lead', 'developer', 'tester', 'visitor']
     if (role && !BUILT_IN_ROLES.includes(role)) {
       const roleRecord = await prisma.role.findUnique({ where: { name: role } })
@@ -80,16 +83,33 @@ const userRoutes = new Elysia({ prefix: '/users' })
       }
     }
 
+    // Validate department if provided
+    if (departmentId) {
+      const dept = await prisma.department.findUnique({ where: { id: departmentId } })
+      if (!dept) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: 'Invalid department' } }
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 10)
 
     const userRecord = await prisma.user.create({
-      data: { email, name, passwordHash, role: role || 'developer' },
+      data: {
+        email,
+        name,
+        passwordHash,
+        role: role || 'developer',
+        departmentId: departmentId || null,
+      },
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
-        createdAt: true
+        departmentId: true,
+        department: { select: { id: true, name: true } },
+        createdAt: true,
       }
     })
 
@@ -99,7 +119,8 @@ const userRoutes = new Elysia({ prefix: '/users' })
       email: t.String({ format: 'email' }),
       name: t.String(),
       password: t.String({ minLength: 6 }),
-      role: t.Optional(t.String())
+      role: t.Optional(t.String()),
+      departmentId: t.Optional(t.String())
     })
   })
   // Get user by ID
@@ -129,12 +150,11 @@ const userRoutes = new Elysia({ prefix: '/users' })
       return { error: { code: 'FORBIDDEN', message: "Permission denied: 'users.edit' is required" } }
     }
 
-    const { name, email, password, role } = body as { name?: string; email?: string; password?: string; role?: string }
+    const { name, email, password, role, departmentId } = body as { name?: string; email?: string; password?: string; role?: string; departmentId?: string | null }
 
     const { prisma } = await import('../utils/prisma')
 
-    // Validate role if provided — only custom roles need to exist in Role table
-    // (built-in roles like admin/pm/tech_lead/developer/tester/visitor are hardcoded strings)
+    // Validate role if provided
     const BUILT_IN_ROLES = ['admin', 'pm', 'tech_lead', 'developer', 'tester', 'visitor']
     if (role && !BUILT_IN_ROLES.includes(role)) {
       const roleRecord = await prisma.role.findUnique({ where: { name: role } })
@@ -144,11 +164,21 @@ const userRoutes = new Elysia({ prefix: '/users' })
       }
     }
 
-    const data: { name?: string; email?: string; passwordHash?: string; role?: string } = {}
+    // Validate department if provided (null = remove department)
+    if (departmentId !== undefined && departmentId !== null) {
+      const dept = await prisma.department.findUnique({ where: { id: departmentId } })
+      if (!dept) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: 'Invalid department' } }
+      }
+    }
+
+    const data: { name?: string; email?: string; passwordHash?: string; role?: string; departmentId?: string | null } = {}
     if (name) data.name = name
     if (email) data.email = email
     if (password) data.passwordHash = await bcrypt.hash(password, 10)
     if (role) data.role = role
+    if (departmentId !== undefined) data.departmentId = departmentId
 
     const updated = await prisma.user.update({
       where: { id: params.id },
@@ -158,7 +188,9 @@ const userRoutes = new Elysia({ prefix: '/users' })
         email: true,
         name: true,
         role: true,
-        createdAt: true
+        departmentId: true,
+        department: { select: { id: true, name: true } },
+        createdAt: true,
       }
     })
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, Settings, Bot } from 'lucide-react'
+import { LayoutDashboard, FolderKanban, ListTodo, Bug, Clock, BarChart3, Users, LogOut, Menu, X, FileText, ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, Settings, Bot, Building2 } from 'lucide-react'
 import clsx from 'clsx'
 
 type NavItem = { path: string; icon: any; label: string; permissions: string[]; adminOnly?: boolean }
@@ -18,6 +18,7 @@ const navItems: NavItem[] = [
 
 const settingsNavItems: NavItem[] = [
   { path: '/users', icon: Users, label: '用戶管理', permissions: ['users.view'] },
+  { path: '/departments', icon: Building2, label: '部門管理', permissions: ['users.view'] },
   { path: '/roles', icon: ShieldCheck, label: '角色權限', permissions: ['roles.view'] },
   { path: '/agents', icon: Bot, label: 'Agent 管理', permissions: [] }, // Admin always sees this
   { path: '/settings', icon: Settings, label: 'AI 設定', permissions: [], adminOnly: true },

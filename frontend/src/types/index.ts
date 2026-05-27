@@ -11,6 +11,8 @@ export interface User {
     maxConcurrentTasks?: number
     personality?: string
   }
+  departmentId?: string | null
+  department?: { id: string; name: string } | null
   createdAt?: string
   /** Per-project memberships — populated in user list for RBAC display */
   projectMemberships?: { projectId: string; projectName: string; role: string }[]
@@ -77,6 +79,14 @@ export interface Role {
   description?: string | null
   permissions: string[]
   isBuiltIn: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface Department {
+  id: string
+  name: string
+  userCount?: number
   createdAt?: string
   updatedAt?: string
 }

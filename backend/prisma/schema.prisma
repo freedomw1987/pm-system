@@ -17,34 +17,36 @@ model User {
   passwordHash String   @map("password_hash")
   isAgent      Boolean  @default(false) @map("is_agent")
   agentConfig  Json?    @map("agent_config")
-  // agentConfig structure:
-  // {
-  //   "model": "gpt-4o-mini",
-  //   "maxConcurrentTasks": 3,
-  //   "systemPrompt": "你是專業的代碼審查員...",
-  //   "skills": ["code_review", "testing", "documentation"],
-  //   "mcpServers": ["github", "jira"],
-  //   "temperature": 0.7,
-  //   "topP": 1.0
-  // }
+  departmentId String?  @map("department_id")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   // Relations
-  ownedProjects       Project[]       @relation("ProjectOwner")
-  projectMemberships  ProjectMember[]
+  department       Department?      @relation(fields: [departmentId], references: [id])
+  ownedProjects    Project[]         @relation("ProjectOwner")
+  projectMemberships ProjectMember[]
   createdRequirements Requirement[]
-  assignedTasks       Task[]          @relation("TaskAssignee")
-  reportedBugs        Bug[]           @relation("BugReporter")
-  assignedBugs        Bug[]           @relation("BugAssignee")
-  workLogs            WorkLog[]
+  assignedTasks    Task[]            @relation("TaskAssignee")
+  reportedBugs     Bug[]             @relation("BugReporter")
+  assignedBugs     Bug[]             @relation("BugAssignee")
+  workLogs         WorkLog[]
   uploadedAttachments Attachment[]
-  refreshTokens       RefreshToken[]
-  createdWikiPages    WikiPage[]
-  chatSessions       ChatSession[]
-  tokenLogs          TokenLog[]
+  refreshTokens    RefreshToken[]
+  createdWikiPages WikiPage[]
+  chatSessions     ChatSession[]
+  tokenLogs        TokenLog[]
 
   @@map("users")
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+
+  @@map("departments")
 }
 
 model Role {

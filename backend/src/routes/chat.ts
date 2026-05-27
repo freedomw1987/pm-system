@@ -458,8 +458,34 @@ ${TOOL_DEFINITIONS.map(t => `- ${t.function.name}: ${t.function.description}`).j
 - 用戶說「查看」「列表」「列出」= list_* 或 get_* 工具
 - 用戶說「更新」「修改」「編輯」= update_* 工具
 - 用戶說「刪除」「移除」= delete_* 工具
+- 用戶說「統計」「圖表」「Chart」「分析進度」= get_project_stats 工具
 - 只有在明確知道 ID 時才能 get/update/delete，否則先 list
 - 所有操作結果要即時總結給用戶，Wiki 搜尋結果需列出標題、相關片段與更新時間
+
+圖表功能：當用戶要求圖表或統計時，先調用 get_project_stats 工具，然後用 Chart.js 生成圖表 HTML。
+
+重要：HTML 標籤不要使用 HTML entities，直接用原始字元！
+
+## 圖表輸出格式（必須嚴格遵守）
+
+請用以下格式輸出，這樣可以確保正確渲染：
+
+「html
+<canvas id="taskChart" data-config='{"type":"bar","data":{"labels":["完成","進行中","待處理"],"datasets":[{"label":"任務狀態","data":[3,5,2],"backgroundColor":["#22c55e","#f59e0b","#94a3b8"]}]},"options":{"responsive":true,"plugins":{"legend":{"position":"top"}}}}'></canvas>
+」
+
+或者更完整的格式（包含多個圖表）：
+
+「html
+<canvas id="reqChart" data-config='{"type":"doughnut","data":{"labels":["待處理","進行中","已完成"],"datasets":[{"data":[5,3,10],"backgroundColor":["#94a3b8","#f59e0b","#22c55e"]}]},"options":{"responsive":true}}'></canvas>
+<canvas id="taskChart" data-config='{"type":"bar","data":{"labels":["待處理","進行中","已完成"],"datasets":[{"label":"任務","data":[8,5,15]}]},"options":{"responsive":true}}'></canvas>
+」
+
+⚠️ 注意：
+- data-config 屬性的值必須是單引號包住的完整 JSON
+- JSON 內部字串用雙引號（標準 JSON）
+- 如果要放多個圖表，每個 canvas 都要有不同的 id
+- 不要在 HTML 區塊中包含外部 script 標籤（CDN 會自動載入）
 
 ${projectCtx}
 
@@ -468,6 +494,19 @@ ${wikiCtx}`
 
 // ─── Tool Definitions ─────────────────────────────────────────────────────────
 const TOOL_DEFINITIONS = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_project_stats',
+      description: '取得項目的統計數據，用於生成圖表。當用戶詢問「統計」「圖表」「Chart」「分析」「進度報告」時使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: '項目 ID（可選，若未提供則使用對話中的項目）' }
+        }
+      }
+    }
+  },
   {
     type: 'function',
     function: {
@@ -730,6 +769,52 @@ type ToolContext = {
 async function executeTool(toolName: string, args: Record<string, any>, ctx: ToolContext) {
   try {
     switch (toolName) {
+      // ── Project Stats ──
+      case 'get_project_stats': {
+        const { projectId } = args
+        const effectiveProjectId = projectId || ctx.projectId
+        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
+
+        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
+        if (!access.ok) return { error: access.message }
+
+        // Get all stats
+        const [requirements, tasks, bugs, wikiPages, members] = await Promise.all([
+          prisma.requirement.findMany({ where: { projectId: effectiveProjectId } }),
+          prisma.task.findMany({ where: { projectId: effectiveProjectId } }),
+          prisma.bug.findMany({ where: { projectId: effectiveProjectId } }),
+          prisma.wikiPage.findMany({ where: { projectId: effectiveProjectId }, select: { id: true, tags: true } }),
+          prisma.projectMember.findMany({ where: { projectId: effectiveProjectId } })
+        ])
+
+        // Count by status
+        const reqByStatus = { pending: 0, in_progress: 0, completed: 0 }
+        const taskByStatus = { pending: 0, in_progress: 0, completed: 0 }
+        const bugByStatus = { open: 0, in_progress: 0, resolved: 0, verified: 0 }
+
+        requirements.forEach(r => { if (r.status in reqByStatus) reqByStatus[r.status as keyof typeof reqByStatus]++ })
+        tasks.forEach(t => { if (t.status in taskByStatus) taskByStatus[t.status as keyof typeof taskByStatus]++ })
+        bugs.forEach(b => { if (b.status in bugByStatus) bugByStatus[b.status as keyof typeof bugByStatus]++ })
+
+        // Calculate completion rates
+        const reqTotal = requirements.length
+        const reqDone = reqByStatus.completed
+        const taskTotal = tasks.length
+        const taskDone = taskByStatus.completed
+        const bugTotal = bugs.length
+        const bugResolved = bugByStatus.resolved + bugByStatus.verified
+
+        return {
+          project: access.project,
+          requirements: { total: reqTotal, ...reqByStatus, completionRate: reqTotal ? Math.round(reqDone / reqTotal * 100) : 0 },
+          tasks: { total: taskTotal, ...taskByStatus, completionRate: taskTotal ? Math.round(taskDone / taskTotal * 100) : 0 },
+          bugs: { total: bugTotal, ...bugByStatus, resolutionRate: bugTotal ? Math.round(bugResolved / bugTotal * 100) : 0 },
+          wikiPages: wikiPages.length,
+          members: members.length,
+          message: `項目統計：${reqTotal} 個需求，${taskTotal} 個任務，${bugTotal} 個缺陷`
+        }
+      }
+
       // ── Wiki ──
       case 'search_wiki': {
         const { projectId, query, limit } = args
@@ -1124,6 +1209,7 @@ async function callLLMWithTools(options: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
         ...(config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {})
       },
       signal: combinedSignal,
@@ -1143,6 +1229,13 @@ async function callLLMWithTools(options: {
       const text = await response.text().catch(() => '')
       console.log('[Chat] LLM error response:', response.status, text)
       throw new Error(`LLM request failed (${response.status}): ${text || response.statusText}`)
+    }
+
+    if (!response.body) {
+      // Some providers return non-streaming response even with stream: true
+      const text = await response.text().catch(() => '')
+      console.log('[Chat] Non-streaming response received')
+      return JSON.parse(text)
     }
 
     return response.json()
@@ -1214,15 +1307,17 @@ async function streamLLMResponse(options: {
         // Create timeout
         const timeoutController = new AbortController()
         const timeoutId = setTimeout(() => timeoutController.abort(), LLM_TIMEOUT_MS)
-        const combinedSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal
+        // Use signal directly - timeout will be handled by the timeout check below
+        const fetchSignal = signal || timeoutController.signal
 
         const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
             ...(config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {})
           },
-          signal: combinedSignal,
+          signal: fetchSignal,
           body: JSON.stringify({
             model: config.model,
             stream: true,
@@ -1237,7 +1332,13 @@ async function streamLLMResponse(options: {
 
         if (!response.ok) {
           const text = await response.text().catch(() => '')
+          console.log('[Chat] LLM error response:', response.status, text)
           throw new Error(`LLM request failed (${response.status}): ${text || response.statusText}`)
+        }
+
+        // Check if body exists for streaming
+        if (!response.body) {
+          throw new Error('LLM response has no body (non-streaming response)')
         }
 
         // Process streaming response
@@ -1314,8 +1415,11 @@ async function streamLLMResponse(options: {
 
             // For search_wiki, always show the file names to user
             if (tc.function.name === 'search_wiki' && result?.results && Array.isArray(result.results)) {
-              const titles = result.results.map((r: any) => r.title || r.title || '未命名').join('\n  ')
+              const titles = result.results.map((r: any) => r.title || '未命名').join('\n  ')
               sendChunk(`\n\n📄 找到 ${result.count} 篇相關文件：\n  ${titles}\n\n`)
+            } else if (tc.function.name === 'search_wiki' && result?.error) {
+              // Show error message
+              sendChunk(`\n\n⚠️ ${result.error}\n\n`)
             }
 
             toolResults.push({
@@ -1348,16 +1452,21 @@ async function streamLLMResponse(options: {
 
           console.log('[Chat] Streaming follow-up LLM with', cleanMessages.length, 'messages')
 
-          // Stream follow-up response
+          // Stream follow-up response - create new AbortController for timeout
+          const followUpController = new AbortController()
+          const followUpTimeoutId = setTimeout(() => followUpController.abort(), LLM_TIMEOUT_MS)
+          const followUpSignal = signal ? AbortSignal.any([signal, followUpController.signal]) : followUpController.signal
+
           let followUpResponse
           try {
             followUpResponse = await fetch(url, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
                 ...(config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {})
               },
-              signal: combinedSignal,
+              signal: followUpSignal,
               body: JSON.stringify({
                 model: config.model,
                 stream: true,
@@ -1365,8 +1474,10 @@ async function streamLLMResponse(options: {
                 messages: cleanMessages
               })
             })
-          } catch (fetchError) {
-            console.log('[Chat] Follow-up fetch error:', fetchError)
+            clearTimeout(followUpTimeoutId)
+          } catch (fetchError: any) {
+            clearTimeout(followUpTimeoutId)
+            console.log('[Chat] Follow-up fetch error:', fetchError.name, fetchError.message)
             throw fetchError
           }
 
@@ -1374,6 +1485,10 @@ async function streamLLMResponse(options: {
             const text = await followUpResponse.text().catch(() => '')
             console.log('[Chat] Follow-up response error:', followUpResponse.status, text)
             throw new Error(`Follow-up LLM failed (${followUpResponse.status})`)
+          }
+
+          if (!followUpResponse.body) {
+            throw new Error('LLM follow-up response has no body (non-streaming response)')
           }
 
           // Log raw response headers for debugging
@@ -1459,7 +1574,8 @@ async function streamLLMResponse(options: {
             })
             sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
             sendData('[DONE]')
-            controller.close()
+            // Only close if not already closed
+            try { controller.close() } catch {}
             return
           } catch (saveError) {
             console.log('[Chat] Failed to save partial:', saveError)
@@ -1484,13 +1600,23 @@ async function streamLLMResponse(options: {
 
         console.log('[Chat] Stream error:', error instanceof Error ? error.message : error)
 
+        // Try to save partial content and send final message
         try {
-          sendData({ error: { code: isTimeout ? 'TIMEOUT' : isNetworkError ? 'NETWORK_ERROR' : 'STREAM_ERROR', message } })
-          sendData('[DONE]')
-          controller.close()
-        } catch {
-          controller.error(error)
-        }
+          // Save partial content to database
+          if (assistantContent.trim()) {
+            await prisma.chatMessage.create({
+              data: { sessionId, role: 'assistant', content: assistantContent + '\n\n[回應被中斷]' }
+            }).catch(() => {})
+          }
+          // Try to send final message to client
+          try {
+            sendData(sseChunk({ id: streamId, model: config.model, content: `\n\n⚠️ ${message}` }))
+            sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
+            sendData('[DONE]')
+          } catch {}
+        } catch {}
+        // Always try to close controller
+        try { controller.close() } catch {}
       }
     }
   })

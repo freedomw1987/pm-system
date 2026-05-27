@@ -178,6 +178,7 @@ export default function WorkLogsPage() {
       '項目': log.task?.project?.name || log.bug?.project?.name || '-',
       '類型': log.task ? '任務' : log.bug ? '缺陷' : '-',
       '任務/缺陷': log.task?.title || log.bug?.title || '-',
+      '部門': (log.user as any)?.department?.name || '-',
       '人員': log.user?.name || '-',
       '時數': log.hours,
       '備註': log.note || ''
@@ -297,6 +298,7 @@ export default function WorkLogsPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">日期</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">項目</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">任務/缺陷</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">部門</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">人員</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">時數</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">備註</th>
@@ -323,6 +325,13 @@ export default function WorkLogsPage() {
                         : log.bug?.title
                         ? `🐛 ${log.bug.title}`
                         : '-'}
+                    </td>
+
+                    {/* Department */}
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {(log.user as any)?.department?.name
+                        || (log.user as any)?.departmentId
+                        || '-'}
                     </td>
 
                     {/* User */}
