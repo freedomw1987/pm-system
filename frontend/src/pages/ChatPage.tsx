@@ -4,15 +4,115 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   Bot, Send, Plus, Trash2, X,
-  MessageSquare, Loader2, Settings
+  MessageSquare, Loader2, Settings, Brain, ChevronDown, ChevronUp, CheckCircle2, AlertCircle
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../utils/api'
+
+// Custom component to render thinking tags differently
+function ThinkingBlock({ content }: { content: string }) {
+  const [collapsed, setCollapsed] = useState(true)
+
+  return (
+    <div className="my-2 rounded-lg border border-purple-200 bg-purple-50 overflow-hidden">
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-purple-100 hover:bg-purple-200 transition-colors text-left"
+      >
+        <Brain size={14} className="text-purple-600" />
+        <span className="text-xs font-medium text-purple-700">AI 思考過程</span>
+        <span className="text-xs text-purple-500">{collapsed ? '（點擊展開）' : '（點擊隱藏）'}</span>
+        <div className="ml-auto">
+          {collapsed ? <ChevronDown size={14} className="text-purple-500" /> : <ChevronUp size={14} className="text-purple-500" />}
+        </div>
+      </button>
+      {!collapsed && (
+        <div className="px-3 py-2 text-xs text-purple-700 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto">
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolActivityList({ activities }: { activities?: ToolActivity[] }) {
+  if (!activities?.length) return null
+
+  return (
+    <div className="mb-3 space-y-1.5">
+      {activities.map((activity, index) => {
+        const isStarted = activity.status === 'started'
+        const isCompleted = activity.status === 'completed'
+        const isFailed = activity.status === 'failed'
+        return (
+          <div
+            key={`${activity.toolName}-${index}-${activity.status}`}
+            className={clsx(
+              'flex items-center gap-2 rounded-lg border px-3 py-2 text-xs',
+              isStarted && 'border-blue-100 bg-blue-50 text-blue-700',
+              isCompleted && 'border-emerald-100 bg-emerald-50 text-emerald-700',
+              isFailed && 'border-red-100 bg-red-50 text-red-700'
+            )}
+          >
+            {isStarted ? (
+              <Loader2 size={13} className="animate-spin flex-shrink-0" />
+            ) : isCompleted ? (
+              <CheckCircle2 size={13} className="flex-shrink-0" />
+            ) : (
+              <AlertCircle size={13} className="flex-shrink-0" />
+            )}
+            <span className="font-medium">{activity.label}</span>
+            {typeof activity.resultCount === 'number' && isCompleted && (
+              <span className="text-gray-500">找到 {activity.resultCount} 筆</span>
+            )}
+            {activity.error && <span className="text-red-500">{activity.error}</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Process markdown to extract thinking tags and render specially
+function processContent(content: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
+  let lastIndex = 0
+  let match
+
+  while ((match = thinkRegex.exec(content)) !== null) {
+    // Add text before the think tag
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index))
+    }
+    // Add the thinking block
+    parts.push(<ThinkingBlock key={`think-${match.index}`} content={match[1].trim()} />)
+    lastIndex = match.index + match[0].length
+  }
+
+  // Add remaining text
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex))
+  }
+
+  return parts
+}
+
+interface ToolActivity {
+  id?: string
+  status: 'started' | 'completed' | 'failed'
+  toolName: string
+  label: string
+  query?: string
+  resultCount?: number
+  error?: string
+}
 
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  toolActivities?: ToolActivity[]
 }
 
 interface ChatSession {
@@ -180,6 +280,11 @@ export default function ChatPage() {
         signal: abortRef.current.signal
       })
 
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '')
+        throw new Error(`Server error: ${res.status} ${errorText}`)
+      }
+
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -197,6 +302,31 @@ export default function ChatPage() {
           if (data === '[DONE]') continue
           try {
             const parsed = JSON.parse(data)
+            const activity = parsed?.tool_activity as ToolActivity | undefined
+            if (activity?.toolName && activity?.status) {
+              setMessages(prev =>
+                prev.map(m => {
+                  if (m.id !== assistantMsgId) return m
+                  const existing = m.toolActivities || []
+                  const activityIndex = activity.id
+                    ? existing.findIndex(item => item.id === activity.id)
+                    : -1
+
+                  if (activityIndex >= 0) {
+                    return {
+                      ...m,
+                      toolActivities: existing.map((item, index) =>
+                        index === activityIndex ? { ...item, ...activity } : item
+                      )
+                    }
+                  }
+
+                  return { ...m, toolActivities: [...existing, activity] }
+                })
+              )
+              continue
+            }
+
             const delta = parsed?.choices?.[0]?.delta?.content
             if (typeof delta === 'string' && delta) {
               assistantContent += delta
@@ -403,28 +533,31 @@ export default function ChatPage() {
                 )}
               >
                 {msg.role === 'assistant' ? (
-                  <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-gray-200 prose-code:rounded prose-code:p-1 prose-code:text-xs">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {msg.content}
-                    </ReactMarkdown>
-                  </div>
+                  <>
+                    <ToolActivityList activities={msg.toolActivities} />
+                    {msg.content ? (
+                      <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:bg-gray-200 prose-code:rounded prose-code:p-1 prose-code:text-xs">
+                        {processContent(msg.content).map((part, i) =>
+                          typeof part === 'string' ? (
+                            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+                              {part}
+                            </ReactMarkdown>
+                          ) : part
+                        )}
+                      </div>
+                    ) : msg.toolActivities?.length ? null : (
+                      <div className="flex items-center gap-2 text-gray-400 text-sm">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>AI 思考中...</span>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <p className="whitespace-pre-wrap">{msg.content}</p>
                 )}
               </div>
             </div>
           ))}
-
-          {streaming && (
-            <div className="flex justify-start">
-              <div className="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
-                <div className="flex items-center gap-2 text-gray-400 text-sm">
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>AI 思考中...</span>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div ref={messagesEndRef} />
         </div>

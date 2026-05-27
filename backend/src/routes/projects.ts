@@ -34,6 +34,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
         description: p.description,
         status: p.status,
         memberCount: p._count.members,
+        requirementCount: p._count.requirements,
         createdAt: p.createdAt
       }))
     }

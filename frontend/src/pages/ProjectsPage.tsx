@@ -203,7 +203,7 @@ export default function ProjectsPage() {
               )}
               <div className="flex items-center gap-4 text-xs text-gray-400">
                 <span>{project.memberCount || 0} 個成員</span>
-                <span>{project._count?.requirements || 0} 個需求</span>
+                <span>{project.requirementCount || 0} 個需求</span>
               </div>
             </div>
           ))}

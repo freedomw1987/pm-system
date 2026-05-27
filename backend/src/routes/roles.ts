@@ -145,8 +145,7 @@ async function seedRolePermissions(prisma: any) {
         where: { name: role.name },
         update: {
           description: role.description,
-          permissions: role.permissions,
-          isBuiltIn: true,
+          // Only update isBuiltIn flag for built-in roles; do NOT reset permissions
         },
         create: role,
       })
@@ -299,6 +298,15 @@ const roleRoutes = new Elysia()
             const role = await prisma.role.update({
               where: { id: params.id },
               data,
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                permissions: true,
+                isBuiltIn: true,
+                createdAt: true,
+                updatedAt: true
+              }
             })
             // Invalidate cache so next request re-loads from DB
             if (role.name) rolePermissionCache.delete(role.name)

@@ -1,11 +1,14 @@
 FROM oven/bun:1-alpine
 
+# Install poppler-utils for PDF to image conversion
+RUN apk add --no-cache poppler-utils
+
 WORKDIR /app
 
 # Copy package files and install dependencies.
 COPY package.json ./
 COPY bun.lock ./
-RUN bun install --frozen-lockfile
+RUN bun install
 
 # Copy application source.
 COPY . .

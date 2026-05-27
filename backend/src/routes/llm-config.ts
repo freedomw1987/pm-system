@@ -9,11 +9,14 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
       set.status = 404
       return { error: { code: 'NOT_FOUND', message: 'LLM config not set. Please configure.' } }
     }
-    // Don't expose apiKey
+    // Don't expose apiKey or visionApiKey
     return {
       id: config.id,
       apiUrl: config.apiUrl,
       model: config.model,
+      visionApiUrl: config.visionApiUrl || null,
+      visionModel: config.visionModel || null,
+      hasVisionKey: !!config.visionApiKey,
       updatedAt: config.updatedAt
     }
   })
@@ -24,10 +27,13 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
       return { error: { code: 'FORBIDDEN', message: 'Admin access required' } }
     }
 
-    const { apiUrl, apiKey, model } = body as {
+    const { apiUrl, apiKey, model, visionApiUrl, visionApiKey, visionModel } = body as {
       apiUrl: string
       apiKey?: string
       model: string
+      visionApiUrl?: string
+      visionApiKey?: string
+      visionModel?: string
     }
 
     if (!apiUrl || !model) {
@@ -37,10 +43,17 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
 
     // Upsert: update existing or create new
     const existing = await prisma.lLMConfig.findFirst()
-    
-    const data: any = { apiUrl, model }
+
+    const data: any = {
+      apiUrl,
+      model
+    }
     // Only update apiKey if provided (so existing key can be retained)
     if (apiKey) data.apiKey = apiKey
+    // Vision LLM fields
+    if (visionApiUrl !== undefined) data.visionApiUrl = visionApiUrl || null
+    if (visionModel !== undefined) data.visionModel = visionModel || null
+    if (visionApiKey) data.visionApiKey = visionApiKey
 
     const config = existing
       ? await prisma.lLMConfig.update({ where: { id: existing.id }, data })
@@ -50,13 +63,19 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
       id: config.id,
       apiUrl: config.apiUrl,
       model: config.model,
+      visionApiUrl: config.visionApiUrl || null,
+      visionModel: config.visionModel || null,
+      hasVisionKey: !!config.visionApiKey,
       updatedAt: config.updatedAt
     }
   }, {
     body: t.Object({
       apiUrl: t.String(),
       apiKey: t.Optional(t.String()),
-      model: t.String()
+      model: t.String(),
+      visionApiUrl: t.Optional(t.String()),
+      visionApiKey: t.Optional(t.String()),
+      visionModel: t.Optional(t.String())
     })
   })
 

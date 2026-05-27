@@ -69,6 +69,12 @@ model LLMConfig {
   apiUrl    String
   apiKey    String   // stored encrypted, revealed only on demand
   model     String
+
+  // Vision LLM for document analysis (PDF, images)
+  visionApiUrl  String?  @map("vision_api_url")
+  visionApiKey  String?  @map("vision_api_key")
+  visionModel   String?  @map("vision_model")
+
   updatedAt DateTime @updatedAt
 
   @@map("llm_configs")

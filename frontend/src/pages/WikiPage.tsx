@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Search, Plus, FileText, Tag, ChevronRight, X } from 'lucide-react'
+import { Search, Plus, FileText, Tag, ChevronRight, X, Upload, CheckCircle, AlertCircle } from 'lucide-react'
+import { documentApi } from '../utils/api'
 
 interface WikiPage {
   id: string
@@ -29,6 +30,10 @@ export default function WikiPage() {
   const [newTags, setNewTags] = useState('')
   const [newContent, setNewContent] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showBatchUpload, setShowBatchUpload] = useState(false)
+  const [batchFiles, setBatchFiles] = useState<File[]>([])
+  const [batchUploading, setBatchUploading] = useState(false)
+  const [batchResults, setBatchResults] = useState<any[]>([])
 
   useEffect(() => {
     fetchProjects()
@@ -87,17 +92,55 @@ export default function WikiPage() {
     setCreating(false)
   }
 
+  const handleBatchFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : []
+    setBatchFiles(files)
+    setBatchResults([])
+  }
+
+  const handleBatchUpload = async () => {
+    if (!selectedProject || batchFiles.length === 0) return
+    setBatchUploading(true)
+    setBatchResults([])
+
+    const formData = new FormData()
+    batchFiles.forEach(file => formData.append('files', file))
+    formData.append('projectId', selectedProject)
+
+    try {
+      const res = await documentApi.batchParse(formData)
+      setBatchResults(res.data.results || [])
+      if (res.data.wikiPagesCreated > 0) {
+        fetchPages()
+      }
+    } catch (err) {
+      console.error('Batch upload failed:', err)
+      setBatchResults([{ name: '上傳失敗', success: false, error: '上傳過程中發生錯誤' }])
+    } finally {
+      setBatchUploading(false)
+    }
+  }
+
   return (
     <div className="max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">知識庫</h1>
-        <button
-          onClick={() => setShowCreate(s => !s)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"
-        >
-          <Plus size={18} />
-          新增頁面
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBatchUpload(s => !s)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+          >
+            <Upload size={18} />
+            批量上傳
+          </button>
+          <button
+            onClick={() => setShowCreate(s => !s)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"
+          >
+            <Plus size={18} />
+            新增頁面
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -128,6 +171,96 @@ export default function WikiPage() {
           ))}
         </select>
       </div>
+
+      {/* Batch upload form */}
+      {showBatchUpload && (
+        <div className="mb-6 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold mb-4">批量上傳文件（AI 解析）</h3>
+          {!selectedProject && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800 mb-4">
+              請先選擇項目後再上傳文件
+            </div>
+          )}
+          <div className="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
+            <p className="font-medium text-blue-800 mb-1">支援格式</p>
+            <p className="text-blue-700">PDF、Word (.docx)、Excel (.xlsx)、Markdown (.md)</p>
+            <p className="text-blue-600 mt-1">最多 20 個文件，每個最大 50MB</p>
+          </div>
+          <div className="mb-4">
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.docx,.xlsx,.md"
+              onChange={handleBatchFilesChange}
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+            />
+          </div>
+          {batchFiles.length > 0 && (
+            <div className="mb-4">
+              <p className="text-sm font-medium text-gray-700 mb-2">已選擇 {batchFiles.length} 個文件：</p>
+              <div className="flex flex-wrap gap-2">
+                {batchFiles.map((file, i) => (
+                  <span key={i} className="px-3 py-1 bg-gray-100 rounded-full text-sm">{file.name}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {batchResults.length > 0 && (
+            <div className="mb-4 max-h-60 overflow-y-auto border rounded-lg">
+              <div className="p-2 bg-gray-50 border-b sticky top-0">
+                <p className="text-sm font-medium">
+                  結果：{batchResults.filter(r => r.success).length}/{batchResults.length} 成功
+                  {batchResults.length > 0 && batchResults[0].wikiPagesCreated > 0 &&
+                    `，已建立 ${batchResults[0].wikiPagesCreated} 個 Wiki 頁面`}
+                </p>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {batchResults.map((r, i) => (
+                  <div key={i} className="p-3 flex items-center gap-3 text-sm">
+                    {r.success ? (
+                      <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    )}
+                    <span className="font-medium">{r.name}</span>
+                    {!r.success && <span className="text-red-500 text-xs">{r.error}</span>}
+                    {r.success && r.wikiPage && (
+                      <Link to={`/wikis/${r.wikiPage.id}`} className="text-primary-600 text-xs hover:underline ml-auto">
+                        查看 →
+                      </Link>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={handleBatchUpload}
+              disabled={batchUploading || !selectedProject || batchFiles.length === 0}
+              className="px-5 py-2.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 flex items-center gap-2"
+            >
+              {batchUploading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                  處理中...
+                </>
+              ) : (
+                <>
+                  <Upload size={16} />
+                  開始上傳並解析
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => { setShowBatchUpload(false); setBatchFiles([]); setBatchResults([]) }}
+              className="px-5 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Create form */}
       {showCreate && (

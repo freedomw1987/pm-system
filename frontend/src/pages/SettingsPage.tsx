@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Settings, Eye, EyeOff, Save, AlertCircle, CheckCircle } from 'lucide-react'
+import { Settings, Eye, EyeOff, Save, AlertCircle, CheckCircle, Image } from 'lucide-react'
 
 interface LLMConfig {
   id?: string
   apiUrl: string
   model: string
+  visionApiUrl?: string
+  visionModel?: string
+  hasVisionKey?: boolean
   updatedAt?: string
 }
 
@@ -12,6 +15,8 @@ export default function SettingsPage() {
   const [config, setConfig] = useState<LLMConfig>({ apiUrl: '', model: '' })
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
+  const [visionApiKey, setVisionApiKey] = useState('')
+  const [showVisionKey, setShowVisionKey] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -26,7 +31,12 @@ export default function SettingsPage() {
       .then(data => {
         if (data.id) {
           setCurrentConfig(data)
-          setConfig({ apiUrl: data.apiUrl, model: data.model })
+          setConfig({
+            apiUrl: data.apiUrl,
+            model: data.model,
+            visionApiUrl: data.visionApiUrl || '',
+            visionModel: data.visionModel || ''
+          })
         }
         setLoading(false)
       })
@@ -42,8 +52,14 @@ export default function SettingsPage() {
     }
     setSaving(true)
     try {
-      const body: any = { apiUrl: config.apiUrl, model: config.model }
+      const body: any = {
+        apiUrl: config.apiUrl,
+        model: config.model,
+        visionApiUrl: config.visionApiUrl || undefined,
+        visionModel: config.visionModel || undefined
+      }
       if (apiKey) body.apiKey = apiKey
+      if (visionApiKey) body.visionApiKey = visionApiKey
       const res = await fetch('/api/llm-config', {
         method: 'PUT',
         headers: {
@@ -56,6 +72,7 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(data.error?.message || '儲存失敗')
       setCurrentConfig(data)
       setApiKey('')
+      setVisionApiKey('')
       setSuccess('設定已儲存')
     } catch (e: any) {
       setError(e.message)
@@ -87,7 +104,10 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+      {/* Main LLM Config */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-800">一般對話 LLM</h2>
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">API URL</label>
           <input
@@ -132,22 +152,75 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
-
-        {currentConfig && (
-          <div className="pt-4 border-t text-sm text-gray-500">
-            上次更新：{new Date(currentConfig.updatedAt!).toLocaleString('zh-HK')}
-          </div>
-        )}
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-2 px-6 py-2.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
-        >
-          <Save size={18} />
-          {saving ? '儲存中...' : '儲存設定'}
-        </button>
       </div>
+
+      {/* Vision LLM Config */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6 mb-6">
+        <div className="flex items-center gap-2">
+          <Image size={20} className="text-primary-500" />
+          <h2 className="text-lg font-semibold text-gray-800">圖像分析 LLM（Vision）</h2>
+        </div>
+        <p className="text-sm text-gray-500 -mt-4">用於 PDF 文件分析和圖像識別，請選擇支援 Vision 的模型（如 gpt-4o、claude-3-sonnet）</p>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">API URL</label>
+          <input
+            type="url"
+            value={config.visionApiUrl || ''}
+            onChange={e => setConfig(c => ({ ...c, visionApiUrl: e.target.value }))}
+            placeholder="https://openrouter.ai/api/v1"
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+          <input
+            type="text"
+            value={config.visionModel || ''}
+            onChange={e => setConfig(c => ({ ...c, visionModel: e.target.value }))}
+            placeholder="openai/gpt-4o"
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            API Key {currentConfig?.hasVisionKey && <span className="text-gray-400 font-normal">（留空保持不變）</span>}
+          </label>
+          <div className="relative">
+            <input
+              type={showVisionKey ? 'text' : 'password'}
+              value={visionApiKey}
+              onChange={e => setVisionApiKey(e.target.value)}
+              placeholder="sk-or-v1-..."
+              className="w-full px-4 py-2.5 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+            <button
+              type="button"
+              onClick={() => setShowVisionKey(s => !s)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showVisionKey ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {currentConfig && (
+        <div className="pt-4 text-sm text-gray-500">
+          上次更新：{new Date(currentConfig.updatedAt!).toLocaleString('zh-HK')}
+        </div>
+      )}
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="flex items-center gap-2 px-6 py-2.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
+      >
+        <Save size={18} />
+        {saving ? '儲存中...' : '儲存設定'}
+      </button>
     </div>
   )
 }

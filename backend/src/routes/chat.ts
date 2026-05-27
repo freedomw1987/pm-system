@@ -5,6 +5,8 @@ import { loadRolePermissions } from '../index'
 const MAX_HISTORY_MESSAGES = 20
 const MAX_CONTEXT_CHARS = 20_000
 const MAX_WIKI_PAGES = 5
+const MAX_WIKI_TOOL_RESULTS = 10
+const DEFAULT_WIKI_TOOL_RESULTS = 5
 
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -52,34 +54,132 @@ function truncateText(text: string, maxLength: number) {
 }
 
 function normalizeSearchTerms(query: string) {
-  return Array.from(new Set(
-    query
-      .toLowerCase()
-      .replace(/[\p{P}\p{S}]/gu, ' ')
-      .split(/\s+/)
-      .map(term => term.trim())
-      .filter(term => term.length >= 2)
-  )).slice(0, 12)
+  // Remove punctuation and split by whitespace
+  const parts = query
+    .replace(/[\p{P}\p{S}]/gu, ' ')
+    .split(/\s+/)
+    .map(term => term.trim())
+    .filter(term => term.length >= 2)
+
+  const terms: string[] = []
+  for (const part of parts) {
+    // For Chinese text (contains CJK characters), extract individual characters and bigrams
+    if (/[一-鿿]/.test(part)) {
+      // Single characters (length >= 2 already ensures we have at least 2 chars)
+      for (let i = 0; i < part.length; i++) {
+        terms.push(part[i])
+      }
+      // Bigrams for better matching
+      for (let i = 0; i < part.length - 1; i++) {
+        terms.push(part.slice(i, i + 2))
+      }
+    } else {
+      // For non-Chinese, use the whole part
+      terms.push(part.toLowerCase())
+    }
+  }
+
+  return Array.from(new Set(terms)).slice(0, 12)
 }
 
 function scoreWikiPage(page: { title: string; content: string; tags: string[] }, terms: string[]) {
   if (terms.length === 0) return 0
-  const title = page.title.toLowerCase()
-  const content = page.content.toLowerCase()
-  const tags = (page.tags || []).join(' ').toLowerCase()
+  const title = page.title
+  const content = page.content
+  const tags = (page.tags || []).join(' ')
 
   return terms.reduce((score, term) => {
     let next = score
-    if (title.includes(term)) next += 5
-    if (tags.includes(term)) next += 3
-    const matches = content.match(new RegExp(escapeRegExp(term), 'g'))
+    // For Chinese, match directly (no case conversion needed)
+    // For non-Chinese (ASCII), use lowercase for case-insensitive match
+    const isChinese = /[一-鿿]/.test(term)
+    const searchTerm = isChinese ? term : term.toLowerCase()
+
+    const titleForMatch = isChinese ? title : title.toLowerCase()
+    const contentForMatch = isChinese ? content : content.toLowerCase()
+    const tagsForMatch = isChinese ? tags : tags.toLowerCase()
+
+    if (titleForMatch.includes(searchTerm)) next += 5
+    if (tagsForMatch.includes(searchTerm)) next += 3
+    const regex = new RegExp(escapeRegExp(searchTerm), isChinese ? '' : 'i')
+    const matches = contentForMatch.match(regex)
     if (matches) next += Math.min(matches.length, 8)
     return next
   }, 0)
 }
 
+type WikiSearchResult = {
+  id: string
+  title: string
+  content: string
+  tags: string[]
+  updatedAt: Date
+  score: number
+  snippet: string
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function clampLimit(value: unknown, fallback: number, max: number) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(1, Math.min(max, Math.floor(parsed)))
+}
+
+function buildWikiSnippet(content: string, terms: string[], maxLength = 700) {
+  const normalizedContent = content || ''
+  if (!normalizedContent) return ''
+
+  const lowerContent = normalizedContent.toLowerCase()
+  const matchedIndex = terms
+    .map(term => lowerContent.indexOf(term.toLowerCase()))
+    .filter(index => index >= 0)
+    .sort((a, b) => a - b)[0]
+
+  if (matchedIndex === undefined) {
+    return truncateText(normalizedContent, maxLength)
+  }
+
+  const halfWindow = Math.floor(maxLength / 2)
+  const start = Math.max(0, matchedIndex - halfWindow)
+  const end = Math.min(normalizedContent.length, start + maxLength)
+  const prefix = start > 0 ? '...' : ''
+  const suffix = end < normalizedContent.length ? '\n...' : ''
+
+  return `${prefix}${normalizedContent.slice(start, end)}${suffix}`
+}
+
+async function searchWikiPages(projectId: string, query: string, limit = DEFAULT_WIKI_TOOL_RESULTS): Promise<WikiSearchResult[]> {
+  const terms = normalizeSearchTerms(query)
+  const take = clampLimit(limit, DEFAULT_WIKI_TOOL_RESULTS, MAX_WIKI_TOOL_RESULTS)
+
+  if (terms.length === 0) return []
+
+  const pages = await prisma.wikiPage.findMany({
+    where: {
+      projectId,
+      OR: terms.flatMap(term => [
+        { title: { contains: term, mode: 'insensitive' as const } },
+        { content: { contains: term, mode: 'insensitive' as const } },
+        { tags: { has: term } }
+      ])
+    } as any,
+    select: { id: true, title: true, content: true, tags: true, updatedAt: true },
+    orderBy: { updatedAt: 'desc' },
+    take: Math.max(30, take * 4)
+  })
+
+  return pages
+    .map(page => ({
+      ...page,
+      score: scoreWikiPage(page, terms),
+      snippet: buildWikiSnippet(page.content, terms)
+    }))
+    .filter(page => page.score > 0)
+    .sort((a, b) => b.score - a.score || b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, take)
 }
 
 function sseChunk({ id, model, content, finishReason = null }: SSEEmitOptions) {
@@ -95,6 +195,59 @@ function sseChunk({ id, model, content, finishReason = null }: SSEEmitOptions) {
         finish_reason: finishReason
       }
     ]
+  }
+}
+
+function toolActivityEvent(options: {
+  id: string
+  model: string
+  status: 'started' | 'completed' | 'failed'
+  toolName: string
+  toolCallId?: string
+  args?: Record<string, any>
+  result?: any
+}) {
+  const { id, model, status, toolName, toolCallId, args = {}, result } = options
+  const query = typeof args.query === 'string' ? args.query : undefined
+  const resultCount = typeof result?.count === 'number'
+    ? result.count
+    : Array.isArray(result?.results)
+      ? result.results.length
+      : undefined
+
+  const labels: Record<string, string> = {
+    search_wiki: query ? `搜尋 Wiki：${query}` : '搜尋 Wiki',
+    list_requirements: '讀取需求列表',
+    get_requirement: '讀取需求詳情',
+    create_requirement: '建立需求',
+    update_requirement: '更新需求',
+    delete_requirement: '刪除需求',
+    list_tasks: '讀取任務列表',
+    get_task: '讀取任務詳情',
+    create_task: '建立任務',
+    update_task: '更新任務',
+    delete_task: '刪除任務',
+    list_bugs: '讀取缺陷列表',
+    get_bug: '讀取缺陷詳情',
+    create_bug: '建立缺陷',
+    update_bug: '更新缺陷',
+    delete_bug: '刪除缺陷'
+  }
+
+  return {
+    id,
+    object: 'chat.tool_activity',
+    created: nowSeconds(),
+    model,
+    tool_activity: {
+      id: toolCallId || `${toolName}-${nowSeconds()}`,
+      status,
+      toolName,
+      label: labels[toolName] || `執行工具：${toolName}`,
+      query,
+      resultCount,
+      error: result?.error
+    }
   }
 }
 
@@ -294,18 +447,19 @@ async function buildSystemPrompt(projectId: string | null, userContent: string) 
     buildWikiContext(projectId, userContent)
   ])
 
-  return `你是這個項目管理系統的 AI 助理助手。你可以通過工具 CRUD（建立、讀取、更新、刪除）項目的：需求（Requirements）、任務（Tasks）、缺陷（Bugs）。
+  return `你是這個項目管理系統的 AI 助理助手。你可以通過工具搜尋項目 Wiki，並 CRUD（建立、讀取、更新、刪除）項目的：需求（Requirements）、任務（Tasks）、缺陷（Bugs）。
 
 以下是可用工具的描述，你必須根據用戶的需求調用正確的工具：
 ${TOOL_DEFINITIONS.map(t => `- ${t.function.name}: ${t.function.description}`).join('\n')}
 
 重要原則：
+- 用戶問「Wiki」「文件」「知識庫」「查找」「搜尋」「search」某個關鍵字或主題 = search_wiki 工具
 - 用戶說「建立」「新增」「創建」= create_* 工具
 - 用戶說「查看」「列表」「列出」= list_* 或 get_* 工具
 - 用戶說「更新」「修改」「編輯」= update_* 工具
 - 用戶說「刪除」「移除」= delete_* 工具
 - 只有在明確知道 ID 時才能 get/update/delete，否則先 list
-- 所有操作結果要即時總結給用戶
+- 所有操作結果要即時總結給用戶，Wiki 搜尋結果需列出標題、相關片段與更新時間
 
 ${projectCtx}
 
@@ -314,6 +468,22 @@ ${wikiCtx}`
 
 // ─── Tool Definitions ─────────────────────────────────────────────────────────
 const TOOL_DEFINITIONS = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_wiki',
+      description: '使用關鍵字搜尋當前項目的 Wiki 知識庫，回傳最相關的頁面標題、標籤、內容片段與更新時間。當用戶詢問 Wiki、文件、知識庫、search、查找某主題時使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: '項目 ID（可選，若未提供則使用對話中的項目）' },
+          query: { type: 'string', description: '搜尋關鍵字或問題，例如：部署、API、登入流程' },
+          limit: { type: 'number', description: `最多回傳幾筆結果，預設 ${DEFAULT_WIKI_TOOL_RESULTS}，最多 ${MAX_WIKI_TOOL_RESULTS}` }
+        },
+        required: ['query']
+      }
+    }
+  },
   {
     type: 'function',
     function: {
@@ -560,6 +730,38 @@ type ToolContext = {
 async function executeTool(toolName: string, args: Record<string, any>, ctx: ToolContext) {
   try {
     switch (toolName) {
+      // ── Wiki ──
+      case 'search_wiki': {
+        const { projectId, query, limit } = args
+        const effectiveProjectId = projectId || ctx.projectId
+        const trimmedQuery = typeof query === 'string' ? query.trim() : ''
+
+        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
+        if (!trimmedQuery) return { error: 'query is required — 請提供要搜尋的 Wiki 關鍵字' }
+
+        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
+        if (!access.ok) return { error: access.message }
+
+        const results = await searchWikiPages(effectiveProjectId, trimmedQuery, limit)
+
+        return {
+          query: trimmedQuery,
+          project: access.project,
+          count: results.length,
+          results: results.map(page => ({
+            id: page.id,
+            title: page.title,
+            tags: page.tags || [],
+            score: page.score,
+            snippet: page.snippet,
+            updatedAt: page.updatedAt
+          })),
+          message: results.length > 0
+            ? `找到 ${results.length} 篇相關 Wiki 頁面`
+            : `找不到包含「${trimmedQuery}」的 Wiki 頁面`
+        }
+      }
+
       // ── Requirements ──
       case 'list_requirements': {
         const { projectId } = args
@@ -879,33 +1081,104 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 }
 
 // ─── LLM Call with Tool Support ───────────────────────────────────────────────
+const LLM_TIMEOUT_MS = 120_000 // 2 minutes for LLM calls
+const LLM_MAX_RETRIES = 2
+const LLM_RETRY_DELAY_MS = 2000
+
+class LLMTimeoutError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LLMTimeoutError'
+  }
+}
+
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 async function callLLMWithTools(options: {
   messages: ChatCompletionMessage[]
   config: { apiUrl: string; apiKey: string; model: string }
   signal?: AbortSignal
+  timeout?: number
+  retryCount?: number
 }) {
-  const { messages, config, signal } = options
+  const { messages, config, signal, timeout = LLM_TIMEOUT_MS, retryCount = 0 } = options
 
-  const response = await fetch(normalizeChatCompletionUrl(config.apiUrl), {
-    method: 'POST',
-    headers: llmHeaders(config.apiKey),
-    signal,
-    body: JSON.stringify({
-      model: config.model,
-      stream: false,
-      temperature: 0.3,
-      messages,
-      tools: TOOL_DEFINITIONS,
-      tool_choice: 'auto'
+  // Create a timeout controller
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort()
+  }, timeout)
+
+  try {
+    // Combine external signal with timeout
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, timeoutController.signal])
+      : timeoutController.signal
+
+    const url = normalizeChatCompletionUrl(config.apiUrl)
+    console.log('[Chat] LLM request to:', url, 'with', messages.length, 'messages')
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {})
+      },
+      signal: combinedSignal,
+      body: JSON.stringify({
+        model: config.model,
+        stream: true,
+        temperature: 0.3,
+        messages,
+        tools: TOOL_DEFINITIONS,
+        tool_choice: 'auto'
+      })
     })
-  })
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`LLM request failed (${response.status}): ${text || response.statusText}`)
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      console.log('[Chat] LLM error response:', response.status, text)
+      throw new Error(`LLM request failed (${response.status}): ${text || response.statusText}`)
+    }
+
+    return response.json()
+  } catch (error: any) {
+    clearTimeout(timeoutId)
+
+    // Log more details about the error
+    console.log('[Chat] LLM error details:', {
+      name: error.name,
+      message: error.message,
+      status: error.response?.status,
+      retryCount
+    })
+
+    // Check if it's a retryable error
+    const isNetworkError = error.name === 'TypeError' ||
+      error.name === 'FetchError' ||
+      error.message?.includes('connection') ||
+      error.message?.includes('network') ||
+      error.message?.includes('fetch') ||
+      error.message?.includes('closed') ||
+      error.message?.includes('aborted')
+
+    const shouldRetry = (error instanceof LLMTimeoutError || isNetworkError) && retryCount < LLM_MAX_RETRIES
+
+    if (shouldRetry) {
+      console.log(`[Chat] Retrying LLM call (${retryCount + 1}/${LLM_MAX_RETRIES})...`)
+      await sleep(LLM_RETRY_DELAY_MS * (retryCount + 1))
+      return callLLMWithTools({ messages, config, signal, timeout, retryCount: retryCount + 1 })
+    }
+
+    if (error.name === 'AbortError' && timeoutController.signal.aborted) {
+      throw new LLMTimeoutError(`LLM request timed out after ${timeout}ms`)
+    }
+    throw error
   }
-
-  return response.json()
 }
 
 async function streamLLMResponse(options: {
@@ -922,6 +1195,7 @@ async function streamLLMResponse(options: {
   const encoder = new TextEncoder()
   const streamId = `chatcmpl-${crypto.randomUUID()}`
   let assistantContent = ''
+  let toolActivitiesSent = 0 // Track how many tool activities we've sent
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -933,27 +1207,94 @@ async function streamLLMResponse(options: {
       }
 
       try {
-        // ── Step 1: Initial LLM call with tools ───────────────────────────────
-        const initialResponse = await callLLMWithTools({ messages, config, signal })
-        const initialContent = initialResponse?.choices?.[0]?.message?.content || ''
-        const toolCalls = initialResponse?.choices?.[0]?.message?.tool_calls || []
+        // ── Step 1: Stream initial LLM call with tools ────────────────────────
+        const url = normalizeChatCompletionUrl(config.apiUrl)
+        console.log('[Chat] Streaming LLM request to:', url, 'with', messages.length, 'messages')
 
-        console.log('[Chat] Initial response - hasContent:', !!initialContent, 'toolCalls:', toolCalls?.length || 0)
+        // Create timeout
+        const timeoutController = new AbortController()
+        const timeoutId = setTimeout(() => timeoutController.abort(), LLM_TIMEOUT_MS)
+        const combinedSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal
 
-        if (initialContent) {
-          sendChunk(initialContent)
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {})
+          },
+          signal: combinedSignal,
+          body: JSON.stringify({
+            model: config.model,
+            stream: true,
+            temperature: 0.3,
+            messages,
+            tools: TOOL_DEFINITIONS,
+            tool_choice: 'auto'
+          })
+        })
+
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => '')
+          throw new Error(`LLM request failed (${response.status}): ${text || response.statusText}`)
         }
+
+        // Process streaming response
+        const reader = response.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let initialContent = ''
+        let toolCalls: any[] = []
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6)
+            if (data === '[DONE]' || data === '') continue
+
+            try {
+              const parsed = JSON.parse(data)
+
+              // Only extract actual content, not reasoning (which shows model's thinking)
+              const delta = parsed?.choices?.[0]?.delta
+              const contentDelta = delta?.content
+              if (typeof contentDelta === 'string' && contentDelta) {
+                initialContent += contentDelta
+                sendChunk(contentDelta)
+              }
+
+              // Extract tool calls
+              const deltaToolCalls = parsed?.choices?.[0]?.delta?.tool_calls
+              if (deltaToolCalls && Array.isArray(deltaToolCalls)) {
+                for (const tc of deltaToolCalls) {
+                  // Find or create tool call
+                  const index = tc.index || 0
+                  if (!toolCalls[index]) {
+                    toolCalls[index] = { id: tc.id, function: { name: '', arguments: '' } }
+                  }
+                  if (tc.function?.name) toolCalls[index].function.name += tc.function.name
+                  if (tc.function?.arguments) toolCalls[index].function.arguments += tc.function.arguments
+                }
+              }
+            } catch {}
+          }
+        }
+
+        console.log('[Chat] Initial streaming complete - content length:', initialContent.length, 'toolCalls:', toolCalls.length)
 
         // ── Step 2: Execute tool calls if any ──────────────────────────────────
         const toolResults: Array<{ tool_call_id: string; name: string; content: string }> = []
 
-        if (toolCalls && toolCalls.length > 0) {
-          // Send thinking indicator
-          sendData(sseChunk({ id: streamId, model: config.model, content: '\n\n🛠️ 正在執行操作...' }))
-          const toolCallStart = assistantContent.length
-
+        if (toolCalls.length > 0) {
           for (const tc of toolCalls) {
-            const toolName = tc.function.name
             let args: Record<string, any> = {}
             try {
               args = JSON.parse(tc.function.arguments || '{}')
@@ -961,24 +1302,33 @@ async function streamLLMResponse(options: {
               args = {}
             }
 
-            console.log('[Chat] Executing tool:', toolName, 'args:', JSON.stringify(args))
+            console.log('[Chat] Executing tool:', tc.function.name, 'args:', JSON.stringify(args))
+            sendData(toolActivityEvent({ id: streamId, model: config.model, status: 'started', toolName: tc.function.name, toolCallId: tc.id, args }))
 
             const ctx: ToolContext = { userId, userRole, userPermissions, projectId }
-            const result = await executeTool(toolName, args, ctx)
+            const result = await executeTool(tc.function.name, args, ctx)
+            const status = result?.error ? 'failed' : 'completed'
 
             console.log('[Chat] Tool result:', JSON.stringify(result).slice(0, 200))
+            sendData(toolActivityEvent({ id: streamId, model: config.model, status, toolName: tc.function.name, toolCallId: tc.id, args, result }))
+
+            // For search_wiki, always show the file names to user
+            if (tc.function.name === 'search_wiki' && result?.results && Array.isArray(result.results)) {
+              const titles = result.results.map((r: any) => r.title || r.title || '未命名').join('\n  ')
+              sendChunk(`\n\n📄 找到 ${result.count} 篇相關文件：\n  ${titles}\n\n`)
+            }
 
             toolResults.push({
               tool_call_id: tc.id,
-              name: toolName,
+              name: tc.function.name,
               content: JSON.stringify(result, null, 2)
             })
           }
 
-          // ── Step 3: Follow-up LLM call with tool results ─────────────────────
+          // ── Step 3: Stream follow-up LLM call with tool results ───────────────
           const toolMessages: ChatCompletionMessage[] = [
             ...messages,
-            { role: 'assistant', content: initialContent || null, tool_calls: toolCalls },
+            { role: 'assistant', content: initialContent || null, tool_calls: toolCalls.map((tc, i) => ({ id: tc.id, type: 'function', function: { name: tc.function.name, arguments: tc.function.arguments } })) },
             ...toolResults.map(tr => ({
               role: 'tool' as ChatRole,
               tool_call_id: tr.tool_call_id,
@@ -996,38 +1346,93 @@ async function streamLLMResponse(options: {
             return m
           })
 
-          console.log('[Chat] Calling follow-up LLM with', cleanMessages.length, 'messages')
+          console.log('[Chat] Streaming follow-up LLM with', cleanMessages.length, 'messages')
 
-          const followUpResponse = await callLLMWithTools({ messages: cleanMessages, config, signal })
-          const followUpContent = followUpResponse?.choices?.[0]?.message?.content || ''
+          // Stream follow-up response
+          let followUpResponse
+          try {
+            followUpResponse = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(config.apiKey ? { 'Authorization': `Bearer ${config.apiKey}` } : {})
+              },
+              signal: combinedSignal,
+              body: JSON.stringify({
+                model: config.model,
+                stream: true,
+                temperature: 0.3,
+                messages: cleanMessages
+              })
+            })
+          } catch (fetchError) {
+            console.log('[Chat] Follow-up fetch error:', fetchError)
+            throw fetchError
+          }
 
-          // DEBUG: log tool execution result
-          console.log('[Chat] Tool executed, results:', toolResults.length, 'followUpContent length:', followUpContent.length)
+          if (!followUpResponse.ok) {
+            const text = await followUpResponse.text().catch(() => '')
+            console.log('[Chat] Follow-up response error:', followUpResponse.status, text)
+            throw new Error(`Follow-up LLM failed (${followUpResponse.status})`)
+          }
 
-          if (followUpContent) {
-            sendChunk(followUpContent)
-          } else if (toolResults.length > 0) {
-            // Tool ran but LLM gave no follow-up text — surface tool errors directly to user
-            const firstError = toolResults.find(r => r.content.includes('"error"'))
-            if (firstError) {
-              // Extract error message from JSON
+          // Log raw response headers for debugging
+          console.log('[Chat] Follow-up response status:', followUpResponse.status)
+          console.log('[Chat] Follow-up response content-type:', followUpResponse.headers.get('content-type'))
+
+          const contentType = followUpResponse.headers.get('content-type') || ''
+          if (contentType.includes('text/event-stream')) {
+            console.log('[Chat] Confirmed SSE stream')
+          } else {
+            // If not SSE, read as regular JSON
+            const text = await followUpResponse.text()
+            console.log('[Chat] Non-SSE response, length:', text.length, 'preview:', text.slice(0, 300))
+          }
+
+          console.log('[Chat] Follow-up response received, processing stream...')
+
+          const followUpReader = followUpResponse.body!.getReader()
+          let followUpBuffer = ''
+          let chunkCount = 0
+
+          while (true) {
+            const { done, value } = await followUpReader.read()
+            if (done) break
+
+            followUpBuffer += decoder.decode(value, { stream: true })
+            const lines = followUpBuffer.split('\n')
+            followUpBuffer = lines.pop() || ''
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              const data = line.slice(6)
+              if (data === '[DONE]' || data === '') continue
+
               try {
-                const parsed = JSON.parse(firstError.content)
-                const msg = parsed?.error || firstError.content
-                sendData(sseChunk({ id: streamId, model: config.model, content: `\n\n❌ 操作失敗：${msg}` }))
-              } catch {
-                sendData(sseChunk({ id: streamId, model: config.model, content: '\n\n❌ 操作失敗，請稍後重試' }))
+                const parsed = JSON.parse(data)
+                // Log raw response structure for debugging
+                chunkCount++
+                if (chunkCount === 1) {
+                  console.log('[Chat] First follow-up chunk:', JSON.stringify(parsed).slice(0, 500))
+                }
+
+                // Only extract actual content, not reasoning
+                const delta = parsed?.choices?.[0]?.delta
+                const contentDelta = delta?.content
+                if (typeof contentDelta === 'string' && contentDelta) {
+                  sendChunk(contentDelta)
+                }
+              } catch (parseErr) {
+                console.log('[Chat] Parse error in follow-up:', parseErr, 'line:', line.slice(0, 100))
               }
             }
           }
+
+          console.log('[Chat] Follow-up streaming complete, chunks:', chunkCount, 'content length:', assistantContent.length)
         }
 
         // ── Step 4: Finalize ───────────────────────────────────────────────────
-        if (!assistantContent.trim()) {
-          sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
-        } else {
-          sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
-        }
+        sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
 
         if (assistantContent.trim()) {
           await prisma.chatMessage.create({
@@ -1042,9 +1447,45 @@ async function streamLLMResponse(options: {
         sendData('[DONE]')
         controller.close()
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'LLM streaming failed'
+        // Check if we already sent partial content
+        const hasPartialContent = assistantContent.trim().length > 0
+
+        if (hasPartialContent) {
+          // Save partial response and notify user
+          console.log('[Chat] Stream interrupted with partial content, saving...')
+          try {
+            await prisma.chatMessage.create({
+              data: { sessionId, role: 'assistant', content: assistantContent + '\n\n[回應被中斷]' }
+            })
+            sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
+            sendData('[DONE]')
+            controller.close()
+            return
+          } catch (saveError) {
+            console.log('[Chat] Failed to save partial:', saveError)
+          }
+        }
+
+        const isTimeout = error instanceof LLMTimeoutError
+        const isNetworkError = error instanceof Error && (
+          error.message?.includes('connection') ||
+          error.message?.includes('network') ||
+          error.message?.includes('fetch') ||
+          error.message?.includes('closed')
+        )
+
+        const message = isTimeout
+          ? '抱歉，AI 回應時間過長，請嘗試較簡短的問題或稍後再試。'
+          : isNetworkError
+            ? '網絡連接不穩定，回應被中斷。請稍後重試。'
+            : error instanceof Error
+              ? `AI 處理失敗：${error.message}`
+              : 'LLM streaming failed'
+
+        console.log('[Chat] Stream error:', error instanceof Error ? error.message : error)
+
         try {
-          sendData({ error: { code: 'STREAM_ERROR', message } })
+          sendData({ error: { code: isTimeout ? 'TIMEOUT' : isNetworkError ? 'NETWORK_ERROR' : 'STREAM_ERROR', message } })
           sendData('[DONE]')
           controller.close()
         } catch {

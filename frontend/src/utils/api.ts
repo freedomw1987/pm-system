@@ -197,6 +197,10 @@ export const documentApi = {
     api.post('/documents/parse', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  batchParse: (formData: FormData) =>
+    api.post('/documents/batch-parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 }
 
 // Agent API

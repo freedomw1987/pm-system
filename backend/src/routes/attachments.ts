@@ -6,6 +6,7 @@ import * as path from 'path'
 import { hasPermission } from '../middleware/permission'
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads'
+const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
 const attachmentRoutes = new Elysia({ prefix: '/attachments' })
   // Upload attachment
@@ -64,6 +65,12 @@ const attachmentRoutes = new Elysia({ prefix: '/attachments' })
       } else {
         set.status = 400
         return { error: { code: 'VALIDATION_ERROR', message: 'file is required and must be a valid file object' } }
+      }
+
+      // Validate file size (50MB limit)
+      if (fileSize > MAX_FILE_SIZE) {
+        set.status = 413
+        return { error: { code: 'PAYLOAD_TOO_LARGE', message: 'File size exceeds 50MB limit' } }
       }
 
       // Generate stored filename

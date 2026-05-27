@@ -106,6 +106,7 @@ export interface Project {
   members?: ProjectMember[]
   requirements?: Requirement[]
   memberCount?: number
+  requirementCount?: number
   _count?: {
     requirements?: number
     tasks?: number

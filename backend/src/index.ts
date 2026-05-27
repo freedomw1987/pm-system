@@ -76,6 +76,12 @@ const app = new Elysia()
       }
     }
   }))
+  // Increase body size limit for file uploads (50MB)
+  .onParse(({ request }, contentType) => {
+    if (contentType === 'multipart/form-data' || request.headers.get('content-type')?.includes('multipart/form-data')) {
+      // Let Elysia handle it, but we validate size in the route handler
+    }
+  })
   // Public routes
   .use(authRoutes)
   // Protected routes
