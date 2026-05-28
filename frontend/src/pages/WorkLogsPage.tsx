@@ -1,15 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Clock, Plus, Calendar, Edit2, Trash2, X, Check, Download } from 'lucide-react'
+import { Clock, Plus, Calendar, Edit2, Trash2, X, Check, Download, BarChart3, Users, Building2, FolderKanban } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { workLogApi, projectApi, taskApi, bugApi, userApi, departmentApi } from '../utils/api'
 import type { WorkLog } from '../types'
 import * as XLSX from 'xlsx'
+import { hasAnyPermission, hasPermission } from '../utils/permissions'
 
 interface ProjectOption { id: string; name: string }
 interface TaskOption { id: string; title: string; requirementTitle?: string }
 interface BugOption { id: string; title: string; requirementTitle?: string }
 interface DepartmentOption { id: string; name: string }
 
+interface GroupedData {
+  name: string
+  department?: string
+  totalHours: number
+  count: number
+}
+
 export default function WorkLogsPage() {
+  const { user } = useAuth()
   const [workLogs, setWorkLogs] = useState<WorkLog[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [tasks, setTasks] = useState<TaskOption[]>([])
@@ -20,6 +30,12 @@ export default function WorkLogsPage() {
   const [filterProject, setFilterProject] = useState('')
   const [filterUser, setFilterUser] = useState('')
   const [filterDepartment, setFilterDepartment] = useState('')
+  const [filterStartDate, setFilterStartDate] = useState('')
+  const [filterEndDate, setFilterEndDate] = useState('')
+  const [groupBy, setGroupBy] = useState<'user' | 'department' | 'project' | ''>('')
+  const [groupedData, setGroupedData] = useState<GroupedData[]>([])
+  const [grandTotal, setGrandTotal] = useState(0)
+  const [totalRecords, setTotalRecords] = useState(0)
   const [users, setUsers] = useState<{ id: string; name: string; departmentId?: string }[]>([])
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [filteredLogs, setFilteredLogs] = useState<WorkLog[]>([])
@@ -92,15 +108,66 @@ export default function WorkLogsPage() {
   }
 
   const loadData = async () => {
+    setIsLoading(true)
     try {
-      const logsRes = await workLogApi.list()
-      setWorkLogs(logsRes.data.workLogs || [])
+      const params: any = {}
+      if (filterProject) params.projectId = filterProject
+      if (filterUser) params.userId = filterUser
+      if (filterDepartment) params.departmentId = filterDepartment
+      if (filterStartDate) params.startDate = filterStartDate
+      if (filterEndDate) params.endDate = filterEndDate
+      if (groupBy) params.groupBy = groupBy
+
+      const res = await workLogApi.list(params)
+
+      if (groupBy) {
+        // Grouped data mode
+        setGroupedData(res.data.groupedData || [])
+        setGrandTotal(res.data.grandTotal || 0)
+        setTotalRecords(res.data.totalRecords || 0)
+        setWorkLogs([])
+      } else {
+        // Regular list mode
+        setWorkLogs(res.data.workLogs || [])
+        setGroupedData([])
+        setGrandTotal(0)
+        setTotalRecords(0)
+      }
     } catch (err) {
       console.error('Failed to load data:', err)
     } finally {
       setIsLoading(false)
     }
   }
+
+  // Reload when filters or groupBy changes
+  useEffect(() => {
+    loadData()
+  }, [filterProject, filterUser, filterDepartment, filterStartDate, filterEndDate, groupBy])
+
+  // Apply client-side filters for list mode (fallback when backend filtering not available)
+  useEffect(() => {
+    if (groupBy) {
+      setFilteredLogs([])
+      return
+    }
+    let result = workLogs
+    if (filterProject) {
+      result = result.filter(log =>
+        log.task?.project?.id === filterProject || log.bug?.project?.id === filterProject
+      )
+    }
+    if (filterUser) {
+      result = result.filter(log => log.user?.id === filterUser)
+    }
+    if (filterDepartment) {
+      result = result.filter(log =>
+        (log.user as any)?.department?.id === filterDepartment ||
+        (log.user as any)?.departmentId === filterDepartment
+      )
+    }
+    setFilteredLogs(result)
+  }, [workLogs, filterProject, filterUser, filterDepartment, groupBy])
 
   const loadTasksAndBugs = async (projectId: string) => {
     if (!projectId) {
@@ -176,8 +243,10 @@ export default function WorkLogsPage() {
       })
       setEditingId(null)
       loadData()
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update work log:', err)
+      const msg = err?.response?.data?.error?.message || '無法更新記錄'
+      alert(msg)
     }
   }
 
@@ -186,8 +255,10 @@ export default function WorkLogsPage() {
     try {
       await workLogApi.delete(id)
       loadData()
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete work log:', err)
+      const msg = err?.response?.data?.error?.message || '無法刪除記錄'
+      alert(msg)
     }
   }
 
@@ -218,6 +289,8 @@ export default function WorkLogsPage() {
         <button
           onClick={() => setShowForm(true)}
           className="btn-primary flex items-center gap-2 justify-center sm:justify-start w-full sm:w-auto"
+          disabled={!hasAnyPermission(user, ['worklogs.create'])}
+          title={!hasAnyPermission(user, ['worklogs.create']) ? '您沒有登記時數的權限' : ''}
         >
           <Plus size={20} />
           <span>登記時數</span>
@@ -226,98 +299,283 @@ export default function WorkLogsPage() {
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6 lg:mb-8">
-        <div className="card p-4 lg:p-6">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0">
-              <Clock className="text-primary-600" size={20} />
+        {groupBy ? (
+          <>
+            <div className="card p-4 lg:p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0">
+                  <Clock className="text-primary-600" size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{grandTotal.toFixed(1)}h</p>
+                  <p className="text-gray-500 text-sm">總計時數</p>
+                </div>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">
-                {filteredLogs.reduce((sum, log) => sum + (Number(log.hours) || 0), 0).toFixed(1)}h
-              </p>
-              <p className="text-gray-500 text-sm">總計時數</p>
+            <div className="card p-4 lg:p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <BarChart3 className="text-green-600" size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{totalRecords}</p>
+                  <p className="text-gray-500 text-sm">記錄筆數</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="card p-4 lg:p-6">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
-              <Calendar className="text-green-600" size={20} />
+            <div className="card p-4 lg:p-6 sm:col-span-2 lg:col-span-1">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+                  <Users className="text-purple-600" size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{groupedData.length}</p>
+                  <p className="text-gray-500 text-sm">分組項目數</p>
+                </div>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{filteredLogs.length}</p>
-              <p className="text-gray-500 text-sm">記錄筆數</p>
+            <div className="card p-4 lg:p-6 lg:col-span-1">
+              <button onClick={() => {
+                const exportData = groupedData.map(g => ({
+                  '分組': g.name,
+                  '部門': g.department || '-',
+                  '時數': g.totalHours,
+                  '筆數': g.count
+                }))
+                const ws = XLSX.utils.json_to_sheet(exportData)
+                const wb = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(wb, ws, `分組_${groupBy}`)
+                XLSX.writeFile(wb, `工作時數_${groupBy}_${new Date().toISOString().split('T')[0]}.xlsx`)
+              }} className="btn-secondary w-full flex items-center justify-center gap-2">
+                <Download size={20} />
+                <span>導出分組</span>
+              </button>
             </div>
-          </div>
-        </div>
-        <div className="card p-4 lg:p-6 sm:col-span-2 lg:col-span-1">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
-              <Clock className="text-purple-600" size={20} />
+          </>
+        ) : (
+          <>
+            <div className="card p-4 lg:p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0">
+                  <Clock className="text-primary-600" size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">
+                    {filteredLogs.reduce((sum, log) => sum + (Number(log.hours) || 0), 0).toFixed(1)}h
+                  </p>
+                  <p className="text-gray-500 text-sm">總計時數</p>
+                </div>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">
-                {filteredLogs.length > 0
-                  ? (filteredLogs.reduce((sum, log) => sum + (Number(log.hours) || 0), 0) / filteredLogs.length).toFixed(1)
-                  : 0}h
-              </p>
-              <p className="text-gray-500 text-sm">平均時數</p>
+            <div className="card p-4 lg:p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <Calendar className="text-green-600" size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{filteredLogs.length}</p>
+                  <p className="text-gray-500 text-sm">記錄筆數</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="card p-4 lg:p-6 lg:col-span-1">
-          <button onClick={exportExcel} className="btn-secondary w-full flex items-center justify-center gap-2">
-            <Download size={20} />
-            <span>導出Excel</span>
-          </button>
-        </div>
+            <div className="card p-4 lg:p-6 sm:col-span-2 lg:col-span-1">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+                  <Clock className="text-purple-600" size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">
+                    {filteredLogs.length > 0
+                      ? (filteredLogs.reduce((sum, log) => sum + (Number(log.hours) || 0), 0) / filteredLogs.length).toFixed(1)
+                      : 0}h
+                  </p>
+                  <p className="text-gray-500 text-sm">平均時數</p>
+                </div>
+              </div>
+            </div>
+            <div className="card p-4 lg:p-6 lg:col-span-1">
+              <button onClick={exportExcel} className="btn-secondary w-full flex items-center justify-center gap-2">
+                <Download size={20} />
+                <span>導出Excel</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-        <select
-          value={filterProject}
-          onChange={(e) => setFilterProject(e.target.value)}
-          className="input-field text-sm"
-        >
-          <option value="">全部項目</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-        <select
-          value={filterDepartment}
-          onChange={(e) => setFilterDepartment(e.target.value)}
-          className="input-field text-sm"
-        >
-          <option value="">全部部門</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
-        <select
-          value={filterUser}
-          onChange={(e) => setFilterUser(e.target.value)}
-          className="input-field text-sm"
-        >
-          <option value="">全部人員</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>{u.name}</option>
-          ))}
-        </select>
+      <div className="space-y-4 mb-6">
+        {/* Date range filter */}
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs text-gray-500 mb-1">開始日期</label>
+            <input
+              type="date"
+              value={filterStartDate}
+              onChange={(e) => setFilterStartDate(e.target.value)}
+              className="input-field text-sm w-full"
+            />
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs text-gray-500 mb-1">結束日期</label>
+            <input
+              type="date"
+              value={filterEndDate}
+              onChange={(e) => setFilterEndDate(e.target.value)}
+              className="input-field text-sm w-full"
+            />
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs text-gray-500 mb-1">快速選擇</label>
+            <select
+              onChange={(e) => {
+                const today = new Date()
+                const formatDate = (d: Date) => d.toISOString().split('T')[0]
+                switch (e.target.value) {
+                  case 'today':
+                    setFilterStartDate(formatDate(today))
+                    setFilterEndDate(formatDate(today))
+                    break
+                  case 'week':
+                    const weekAgo = new Date(today)
+                    weekAgo.setDate(weekAgo.getDate() - 7)
+                    setFilterStartDate(formatDate(weekAgo))
+                    setFilterEndDate(formatDate(today))
+                    break
+                  case 'month':
+                    const monthAgo = new Date(today)
+                    monthAgo.setDate(monthAgo.getDate() - 30)
+                    setFilterStartDate(formatDate(monthAgo))
+                    setFilterEndDate(formatDate(today))
+                    break
+                  case 'all':
+                    setFilterStartDate('')
+                    setFilterEndDate('')
+                    break
+                }
+              }}
+              className="input-field text-sm w-full"
+            >
+              <option value="all">全部時間</option>
+              <option value="today">今天</option>
+              <option value="week">最近7天</option>
+              <option value="month">最近30天</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Project, Department, User filters + Group By */}
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex-1 min-w-[150px]">
+            <select
+              value={filterProject}
+              onChange={(e) => setFilterProject(e.target.value)}
+              className="input-field text-sm w-full"
+            >
+              <option value="">全部項目</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            {hasAnyPermission(user, ['worklogs.view_all']) ? (
+              <select
+                value={filterDepartment}
+                onChange={(e) => setFilterDepartment(e.target.value)}
+                className="input-field text-sm w-full"
+              >
+                <option value="">全部部門</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" value="我所在部門" disabled className="input-field text-sm w-full bg-gray-100" />
+            )}
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            {hasAnyPermission(user, ['worklogs.view_all']) ? (
+              <select
+                value={filterUser}
+                onChange={(e) => setFilterUser(e.target.value)}
+                className="input-field text-sm w-full"
+              >
+                <option value="">全部人員</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" value="我自己" disabled className="input-field text-sm w-full bg-gray-100" />
+            )}
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as any)}
+              className="input-field text-sm w-full"
+            >
+              <option value="">顯示列表</option>
+              <option value="user">按人員統計</option>
+              <option value="department">按部門統計</option>
+              <option value="project">按項目統計</option>
+            </select>
+          </div>
+        </div>
       </div>
 
-      {/* Work Logs List */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-500"></div>
-        </div>
-      ) : filteredLogs.length === 0 ? (
-        <div className="card p-12 text-center">
-          <Clock size={48} className="mx-auto text-gray-400 mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">暫無時數記錄</h3>
-          <p className="text-gray-500">開始登記您的工作時數</p>
-        </div>
+      {/* Grouped Data View */}
+      {groupBy && !isLoading ? (
+        groupedData.length === 0 ? (
+          <div className="card p-12 text-center">
+            <BarChart3 size={48} className="mx-auto text-gray-400 mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">暫無時數記錄</h3>
+            <p className="text-gray-500">嘗試調整篩選條件</p>
+          </div>
+        ) : (
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      {groupBy === 'user' ? '人員' : groupBy === 'department' ? '部門' : '項目'}
+                    </th>
+                    {groupBy === 'user' && (
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">部門</th>
+                    )}
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">時數</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">記錄筆數</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">平均時數</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {groupedData.map((item, index) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.name}</td>
+                      {groupBy === 'user' && (
+                        <td className="px-6 py-4 text-sm text-gray-600">{item.department || '-'}</td>
+                      )}
+                      <td className="px-6 py-4 text-sm text-right font-medium text-primary-600">{item.totalHours.toFixed(1)}h</td>
+                      <td className="px-6 py-4 text-sm text-right text-gray-600">{item.count}</td>
+                      <td className="px-6 py-4 text-sm text-right text-gray-500">{(item.totalHours / item.count).toFixed(1)}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50 font-medium">
+                  <tr>
+                    <td className="px-6 py-3 text-sm text-gray-900">總計</td>
+                    {groupBy === 'user' && <td className="px-6 py-3"></td>}
+                    <td className="px-6 py-3 text-sm text-primary-600 text-right">{grandTotal.toFixed(1)}h</td>
+                    <td className="px-6 py-3 text-sm text-gray-600 text-right">{totalRecords}</td>
+                    <td className="px-6 py-3 text-sm text-gray-500 text-right">{(grandTotal / totalRecords).toFixed(1)}h</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
@@ -422,20 +680,40 @@ export default function WorkLogsPage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => startEdit(log)}
-                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="編輯"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(log.id)}
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="刪除"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {(user?.role === 'admin' || log.user?.id === user?.id) && hasAnyPermission(user, ['worklogs.edit']) ? (
+                            <button
+                              onClick={() => startEdit(log)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="編輯"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                          ) : hasAnyPermission(user, ['worklogs.edit_all']) ? (
+                            <button
+                              onClick={() => startEdit(log)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="編輯全部"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                          ) : null}
+                          {(user?.role === 'admin' || log.user?.id === user?.id) && hasAnyPermission(user, ['worklogs.delete']) ? (
+                            <button
+                              onClick={() => handleDelete(log.id)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="刪除"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          ) : hasAnyPermission(user, ['worklogs.delete_all']) ? (
+                            <button
+                              onClick={() => handleDelete(log.id)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="刪除全部"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          ) : null}
                         </div>
                       )}
                     </td>

@@ -710,8 +710,8 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
         const llmResult = await analyzeDocumentWithLLM(
           fileInfo.fileName,
           parsedText,
-          isPdfFile ? fileInfo.buffer : (shouldUseVision ? fileInfo.buffer : undefined),
-          isPdfFile ? fileInfo.mimeType : (shouldUseVision ? fileInfo.mimeType : undefined),
+          isPdfFile ? fileInfo.buffer : undefined,
+          isPdfFile ? fileInfo.mimeType : undefined,
           isPdfFile
         )
         const llmOutput = llmResult.raw ?? ''
@@ -733,6 +733,7 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
         const wikiContent = buildFallbackWikiContent(fileInfo.fileName, parsedText, llmOutput, structured)
 
         let wikiPage = null
+        let attachment = null
         if (projectId) {
           const lastPage = await prisma.wikiPage.findFirst({
             where: { projectId },
@@ -755,6 +756,43 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
             }
           })
           wikiPagesCreated++
+
+          // Also save the file as an attachment
+          try {
+            const fs = await import('fs')
+            const path = await import('path')
+            const { v4: uuidv4 } = await import('uuid')
+            const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads'
+
+            const ext = path.extname(fileInfo.fileName)
+            const storedFilename = `${uuidv4()}${ext}`
+            const storedPath = path.join(UPLOAD_DIR, storedFilename)
+
+            // Ensure upload directory exists
+            if (!fs.existsSync(UPLOAD_DIR)) {
+              fs.mkdirSync(UPLOAD_DIR, { recursive: true })
+            }
+
+            // Write file to disk
+            fs.writeFileSync(storedPath, fileInfo.buffer)
+
+            // Create attachment record
+            attachment = await prisma.attachment.create({
+              data: {
+                entityType: 'wiki',
+                entityId: wikiPage.id,
+                filename: fileInfo.fileName,
+                storedPath: storedFilename,
+                mimeType: fileInfo.mimeType,
+                fileSize: fileInfo.fileSize,
+                uploadedById: user.id,
+                projectId
+              }
+            })
+          } catch (attachmentError) {
+            console.error('Failed to create attachment:', attachmentError)
+            // Don't fail the whole operation if attachment creation fails
+          }
         }
 
         results.push({
@@ -762,7 +800,8 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           success: true,
           type: ext,
           size: fileInfo.fileSize,
-          wikiPage
+          wikiPage,
+          attachment
         })
       } catch (error) {
         console.error('Batch parse error:', error)

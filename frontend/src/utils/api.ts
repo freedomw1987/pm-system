@@ -60,7 +60,8 @@ export const authApi = {
 
 // User API
 export const userApi = {
-  list: () => api.get('/users'),
+  list: (params?: { departmentId?: string }) =>
+    api.get('/users', params ? { params } : undefined),
   listSimple: () => api.get('/users/list'),
   create: (data: { email: string; name: string; password: string; role?: string; departmentId?: string }) =>
     api.post('/users', data),
@@ -78,7 +79,7 @@ export const roleApi = {
   update: (id: string, data: { name?: string; description?: string | null; permissions?: string[] }) =>
     api.put(`/roles/${id}`, data),
   delete: (id: string) => api.delete(`/roles/${id}`),
-  permissions: () => api.get('/permissions'),
+  permissions: () => api.get('/roles/permissions'),
 }
 
 // Department API
@@ -91,11 +92,12 @@ export const departmentApi = {
 
 // Project API
 export const projectApi = {
-  list: () => api.get('/projects'),
-  create: (data: { name: string; description?: string }) =>
+  list: (params?: { departmentId?: string }) =>
+    api.get('/projects', params ? { params } : undefined),
+  create: (data: { name: string; description?: string; departmentId?: string }) =>
     api.post('/projects', data),
   get: (id: string) => api.get(`/projects/${id}`),
-  update: (id: string, data: { name?: string; description?: string; status?: string }) =>
+  update: (id: string, data: { name?: string; description?: string; status?: string; departmentId?: string }) =>
     api.put(`/projects/${id}`, data),
   delete: (id: string) => api.delete(`/projects/${id}`),
   getMembers: (id: string) => api.get(`/projects/${id}/members`),
@@ -112,9 +114,9 @@ export const requirementApi = {
   list: (projectId: string) => api.get(`/projects/${projectId}/requirements`),
   listAll: () => api.get('/requirements'),
   get: (id: string) => api.get(`/requirements/${id}`),
-  create: (projectId: string, data: { title: string; description?: string; priority?: string }) =>
+  create: (projectId: string, data: { title: string; description?: string; priority?: string; assigneeId?: string }) =>
     api.post(`/projects/${projectId}/requirements`, data),
-  update: (id: string, data: { title?: string; description?: string; status?: string; priority?: string }) =>
+  update: (id: string, data: { title?: string; description?: string; status?: string; priority?: string; assigneeId?: string }) =>
     api.put(`/requirements/${id}`, data),
   delete: (id: string) => api.delete(`/requirements/${id}`),
 }

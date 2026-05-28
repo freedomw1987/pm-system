@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Users, Trash2, UserPlus, Pencil, Upload, X, CheckCircle, AlertCircle } from 'lucide-react'
 import { userApi, roleApi, departmentApi } from '../utils/api'
 import type { User, Role, Department } from '../types'
+import { useAuth } from '../context/AuthContext'
+import { hasAnyPermission } from '../utils/permissions'
 
 interface BatchResult {
   email: string
@@ -11,6 +13,7 @@ interface BatchResult {
 }
 
 export default function UsersPage() {
+  const { user } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -24,14 +27,15 @@ export default function UsersPage() {
   const [batchResults, setBatchResults] = useState<BatchResult[]>([])
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
   const [batchPreview, setBatchPreview] = useState<{ name: string; email: string; role: string; password: string; department: string }[]>([])
+  const [filterDepartment, setFilterDepartment] = useState('')
 
-  useEffect(() => { loadUsers() }, [])
+  useEffect(() => { loadUsers() }, [filterDepartment])
 
   const loadUsers = async () => {
     setIsLoading(true)
     try {
       const [usersRes, rolesRes, deptsRes] = await Promise.all([
-        userApi.list(),
+        userApi.list(filterDepartment ? { departmentId: filterDepartment } : undefined),
         roleApi.list(),
         departmentApi.list(),
       ])
@@ -183,6 +187,10 @@ export default function UsersPage() {
   }
   const projectRoleLabel = (r: string) => ({ pm: '項目經理', tech_lead: '技術主管', developer: '開發', tester: '測試' }[r] || r)
 
+  const canCreateUser = hasAnyPermission(user, ['users.create'])
+  const canEditUser = hasAnyPermission(user, ['users.edit'])
+  const canDeleteUser = hasAnyPermission(user, ['users.delete'])
+
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
@@ -190,13 +198,27 @@ export default function UsersPage() {
           <h1 className="text-3xl font-bold text-gray-900">用戶管理</h1>
           <p className="text-gray-500 mt-1">管理系統用戶帳號與項目角色</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-            <UserPlus size={20} /> 新建用戶
-          </button>
-          <button onClick={openBatchCreate} className="btn-secondary flex items-center gap-2">
-          <Upload size={20} /> 批量新增
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            value={filterDepartment}
+            onChange={(e) => { setFilterDepartment(e.target.value); loadUsers() }}
+            className="input-field w-40"
+          >
+            <option value="">全部部門</option>
+            {departments.map(d => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+          {canCreateUser && (
+            <>
+              <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+                <UserPlus size={20} /> 新建用戶
+              </button>
+              <button onClick={openBatchCreate} className="btn-secondary flex items-center gap-2">
+                <Upload size={20} /> 批量新增
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -231,12 +253,16 @@ export default function UsersPage() {
                   <span className={`badge ${user.role === 'admin' ? 'bg-red-100 text-red-700' : user.role === 'pm' ? 'bg-purple-100 text-purple-700' : user.role === 'developer' ? 'bg-orange-100 text-orange-700' : user.role === 'tester' ? 'bg-green-100 text-green-700' : user.role === 'tech_lead' ? 'bg-blue-100 text-blue-700' : 'bg-blue-100 text-blue-700'}`}>
                     {roleLabel(user.role)}
                   </span>
-                  <button onClick={() => handleEdit(user)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                    <Pencil size={16} />
-                  </button>
-                  <button onClick={() => handleDelete(user.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                    <Trash2 size={16} />
-                  </button>
+                  {canEditUser && (
+                    <button onClick={() => handleEdit(user)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                      <Pencil size={16} />
+                    </button>
+                  )}
+                  {canDeleteUser && (
+                    <button onClick={() => handleDelete(user.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -288,7 +314,7 @@ export default function UsersPage() {
                   className="input-field"
                 >
                   <option value="">— 未指定 —</option>
-                  {departments.map((d) => (
+стояние {departments.map((d) => (
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
                 </select>
@@ -300,7 +326,7 @@ export default function UsersPage() {
                     <option key={r.id} value={r.name}>{r.description || r.name}</option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-500 mt-1">全局角色用於登入系統，項目角色在「項目成員」中設定</p>
+                <p className="text-xs text-gray-500 mt-1">全局角色用於登入系統，項目凅色在「項目成員」中設定</p>
               </div>
               <div className="flex gap-3 justify-end">
                 <button type="button" onClick={() => { setShowForm(false); setEditingUser(null) }} className="btn-secondary">取消</button>
@@ -396,7 +422,7 @@ export default function UsersPage() {
                   </div>
                   <div className="divide-y divide-gray-100">
                     {batchResults.map((r, i) => (
-                      <div key={i} className="p-2 flex items-center gap-2 text-sm">
+                      <div key={i} className="w-full flex items-center gap-2 text-sm">
                         {r.success ? (
                           <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
                         ) : (

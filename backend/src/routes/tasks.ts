@@ -14,8 +14,12 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
     if (query.status) where.status = query.status
     if (query.requirementId) where.requirements = { some: { requirementId: query.requirementId } }
 
+    // Check if user can view all tasks
+    const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'tasks.view_all'))
+
     // Developers and testers can only see their own tasks
-    if (user && (user.role === 'developer' || user.role === 'tester')) {
+    // Others (with view_all or admin) can see all tasks
+    if (!canViewAll && (user?.role === 'developer' || user?.role === 'tester')) {
       where.assigneeId = user.id
     } else if (query.assigneeId) {
       where.assigneeId = query.assigneeId
@@ -104,7 +108,13 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
     })
   })
   // Get task by ID
-  .get('/:id', async ({ params, set }) => {
+  .get('/:id', async ({ params, set, user }) => {
+    // Require authentication
+    if (!user) {
+      set.status = 401
+      return { error: { code: 'UNAUTHORIZED', message: 'Login required' } }
+    }
+
     const task = await prisma.task.findUnique({
       where: { id: params.id },
       include: {

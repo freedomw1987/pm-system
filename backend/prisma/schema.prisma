@@ -26,6 +26,7 @@ model User {
   ownedProjects    Project[]         @relation("ProjectOwner")
   projectMemberships ProjectMember[]
   createdRequirements Requirement[]
+  assignedRequirements Requirement[] @relation("RequirementAssignee")
   assignedTasks    Task[]            @relation("TaskAssignee")
   reportedBugs     Bug[]             @relation("BugReporter")
   assignedBugs     Bug[]             @relation("BugAssignee")
@@ -45,6 +46,7 @@ model Department {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   users     User[]
+  projects  Project[]
 
   @@map("departments")
 }
@@ -137,11 +139,13 @@ model Project {
   startDate   DateTime? @map("start_date")
   endDate     DateTime? @map("end_date")
   createdById String    @map("created_by_id")
+  departmentId String? @map("department_id")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   // Relations
   owner        User            @relation("ProjectOwner", fields: [createdById], references: [id])
+  department   Department?      @relation(fields: [departmentId], references: [id])
   members      ProjectMember[]
   requirements Requirement[]
   tasks        Task[]
@@ -176,12 +180,14 @@ model Requirement {
   status      String   @default("pending") // pending, in_progress, completed
   priority    String   @default("medium") // low, medium, high
   createdById String   @map("created_by_id")
+  assigneeId  String?  @map("assignee_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   // Relations
   project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdBy User              @relation(fields: [createdById], references: [id])
+  assignee  User?             @relation("RequirementAssignee", fields: [assigneeId], references: [id])
   tasks     TaskRequirement[]
   bugs      Bug[]
 

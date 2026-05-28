@@ -4,7 +4,13 @@ import { hasPermission } from '../middleware/permission'
 
 const userRoutes = new Elysia({ prefix: '/users' })
   // Get all users (for filter dropdowns)
-  .get('/list', async ({ user }) => {
+  .get('/list', async ({ set, user }) => {
+    // Require authentication - any logged-in user can get user list for dropdowns
+    if (!user) {
+      set.status = 401
+      return { error: { code: 'UNAUTHORIZED', message: 'Login required' } }
+    }
+
     const { prisma } = await import('../utils/prisma')
     const users = await prisma.user.findMany({
       select: { id: true, name: true },
@@ -13,15 +19,32 @@ const userRoutes = new Elysia({ prefix: '/users' })
     return { users }
   })
   // Get all users
-  .get('/', async ({ set, user }) => {
-    if (!hasPermission(user, 'users.view')) {
+  .get('/', async ({ query, set, user }) => {
+    // Check if user can view all users
+    const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'users.view_all'))
+
+    if (!canViewAll && !hasPermission(user, 'users.view')) {
       set.status = 403
-      return { error: { code: 'FORBIDDEN', message: "Permission denied: 'users.view' is required" } }
+      return { error: { code: 'FORBIDDEN', message: "Permission denied: 'users.view' or 'users.view_all' is required" } }
     }
 
+    const { departmentId } = query as { departmentId?: string }
+
     const { prisma } = await import('../utils/prisma')
+    const where: any = {}
+
+    // If not admin or view_all, only show own user
+    if (!canViewAll) {
+      where.id = user?.id
+    }
+
+    if (departmentId && canViewAll) {
+      where.departmentId = departmentId
+    }
+
     const users = await prisma.user.findMany({
-      select: {
+      where,
+      select: canViewAll ? {
         id: true,
         email: true,
         name: true,
@@ -34,6 +57,14 @@ const userRoutes = new Elysia({ prefix: '/users' })
             project: { select: { id: true, name: true } }
           }
         }
+      } : {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        departmentId: true,
+        department: { select: { id: true, name: true } },
+        createdAt: true
       },
       orderBy: { createdAt: 'desc' }
     })
@@ -47,11 +78,13 @@ const userRoutes = new Elysia({ prefix: '/users' })
         departmentId: u.departmentId,
         department: u.department,
         createdAt: u.createdAt,
-        projectMemberships: u.projectMemberships.map(m => ({
-          projectId: m.project.id,
-          projectName: m.project.name,
-          role: m.role
-        }))
+        ...(canViewAll && 'projectMemberships' in u ? {
+          projectMemberships: (u as any).projectMemberships.map((m: any) => ({
+            projectId: m.project.id,
+            projectName: m.project.name,
+            role: m.role
+          }))
+        } : {})
       }))
     }
   })

@@ -4,22 +4,31 @@ import { hasPermission } from '../middleware/permission'
 
 const projectRoutes = new Elysia({ prefix: '/projects' })
   // Get all projects (filtered by permission)
-  .get('/', async ({ user }) => {
-    // For admin with users.view OR admin role: all projects
-    // For others: only projects where they are a member
+  .get('/', async ({ query, user }) => {
+    const { departmentId } = query as { departmentId?: string }
+
+    // Build where clause
+    const where: any = {}
+
+    // Admin sees all projects (optionally filtered by department)
+    if (user?.role !== 'admin') {
+      // Non-admin: only projects they are a member of
+      where.members = { some: { userId: user?.id } }
+    }
+
+    // Filter by department
+    if (departmentId) {
+      where.departmentId = departmentId
+    }
+
     const projects = await prisma.project.findMany({
-      where: !user || user.role === 'admin'
-        ? {}
-        : {
-            members: {
-              some: { userId: user.id }
-            }
-          },
+      where,
       include: {
         _count: {
           select: { members: true, requirements: true }
         },
         owner: { select: { id: true, name: true, email: true } },
+        department: { select: { id: true, name: true } },
         members: {
           include: { user: { select: { id: true, name: true, email: true } } }
         }
@@ -33,6 +42,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
         name: p.name,
         description: p.description,
         status: p.status,
+        department: p.department,
         memberCount: p._count.members,
         requirementCount: p._count.requirements,
         createdAt: p.createdAt
@@ -41,7 +51,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
   })
   // Create project (PM or Admin with projects.create)
   .post('/', async ({ body, set, user }) => {
-    const { name, description } = body as { name: string; description?: string }
+    const { name, description, departmentId } = body as { name: string; description?: string; departmentId?: string }
 
     // Permission check: projects.create OR (admin/pm for backward compat)
     if (!user || (!hasPermission(user, 'projects.create') && user.role !== 'admin' && user.role !== 'pm')) {
@@ -53,6 +63,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       data: {
         name,
         description,
+        departmentId,
         createdById: user.id,
         members: {
           create: {
@@ -62,6 +73,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
         }
       },
       include: {
+        department: { select: { id: true, name: true } },
         members: {
           include: { user: { select: { id: true, name: true, email: true } } }
         }
@@ -72,7 +84,8 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
   }, {
     body: t.Object({
       name: t.String(),
-      description: t.Optional(t.String())
+      description: t.Optional(t.String()),
+      departmentId: t.Optional(t.String())
     })
   })
   // Get project by ID
@@ -81,6 +94,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       where: { id: params.id },
       include: {
         owner: { select: { id: true, name: true, email: true } },
+        department: { select: { id: true, name: true } },
         members: {
           include: { user: { select: { id: true, name: true, email: true } } }
         },
@@ -134,7 +148,7 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
   })
   // Create requirement under a project (nested under projects)
   .post('/:id/requirements', async ({ params, body, set, user }) => {
-    const { title, description } = body as { title: string; description?: string }
+    const { title, description, priority, assigneeId } = body as { title: string; description?: string; priority?: string; assigneeId?: string }
 
     // Check permission: projects.create OR admin/pm for backward compat
     const membership = await prisma.projectMember.findFirst({
@@ -146,15 +160,29 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       return { error: { code: 'FORBIDDEN', message: "Permission denied: 'projects.create' is required" } }
     }
 
+    // Validate assignee is a project member if provided
+    if (assigneeId) {
+      const memberCheck = await prisma.projectMember.findFirst({
+        where: { projectId: params.id, userId: assigneeId }
+      })
+      if (!memberCheck) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: '負責人必須是項目成員' } }
+      }
+    }
+
     const requirement = await prisma.requirement.create({
       data: {
         projectId: params.id,
         title,
         description,
-        createdById: user.id
+        priority: priority || 'medium',
+        createdById: user.id,
+        assigneeId: assigneeId || null
       },
       include: {
-        createdBy: { select: { id: true, name: true } }
+        createdBy: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true } }
       }
     })
 
@@ -162,12 +190,16 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
   }, {
     body: t.Object({
       title: t.String(),
-      description: t.Optional(t.String())
+      description: t.Optional(t.String()),
+      priority: t.Optional(t.String()),
+      assigneeId: t.Optional(t.String())
     })
   })
   // Update project
   .put('/:id', async ({ params, body, set, user }) => {
-    const { name, description, status } = body as { name?: string; description?: string; status?: string }
+    const { name, description, status, departmentId } = body as {
+      name?: string; description?: string; status?: string; departmentId?: string
+    }
 
     const existing = await prisma.project.findUnique({ where: { id: params.id } })
     if (!existing) {
@@ -187,8 +219,9 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
 
     const project = await prisma.project.update({
       where: { id: params.id },
-      data: { name, description, status },
+      data: { name, description, status, departmentId },
       include: {
+        department: { select: { id: true, name: true } },
         members: {
           include: { user: { select: { id: true, name: true, email: true } } }
         }

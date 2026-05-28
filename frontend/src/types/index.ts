@@ -132,6 +132,7 @@ export interface Requirement {
   priority: 'low' | 'medium' | 'high'
   status: 'pending' | 'in_progress' | 'completed'
   createdBy?: User
+  assignee?: Pick<User, 'id' | 'name'>
   createdAt: string
   taskCount?: number
   tasks?: Task[]

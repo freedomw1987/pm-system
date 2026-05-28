@@ -22,6 +22,7 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
       include: {
         project: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true } },
         _count: { select: { tasks: true } }
       },
       orderBy: { createdAt: 'desc' }
@@ -35,7 +36,8 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
       where: { id: params.id },
       include: {
         project: { select: { id: true, name: true } },
-        createdBy: { select: { id: true, name: true } }
+        createdBy: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true } }
       }
     })
 
@@ -62,7 +64,7 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
   })
   // Create requirement
   .post('/', async ({ body, set, user }) => {
-    const { projectId, title, description, priority } = body as { projectId: string; title: string; description?: string; priority?: string }
+    const { projectId, title, description, priority, assigneeId } = body as { projectId: string; title: string; description?: string; priority?: string; assigneeId?: string }
 
     if (!user) {
       set.status = 403
@@ -79,16 +81,29 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
       return { error: { code: 'FORBIDDEN', message: 'Only PM or Admin can create requirements' } }
     }
 
+    // Validate assignee is a project member if provided
+    if (assigneeId) {
+      const memberCheck = await prisma.projectMember.findFirst({
+        where: { projectId, userId: assigneeId }
+      })
+      if (!memberCheck) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: '負責人必須是項目成員' } }
+      }
+    }
+
     const requirement = await prisma.requirement.create({
       data: {
         projectId,
         title,
         description,
         priority: priority || 'medium',
-        createdById: user.id
+        createdById: user.id,
+        assigneeId: assigneeId || null
       },
       include: {
-        createdBy: { select: { id: true, name: true } }
+        createdBy: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true } }
       }
     })
 
@@ -98,12 +113,13 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
       projectId: t.String(),
       title: t.String(),
       description: t.Optional(t.String()),
-      priority: t.Optional(t.String())
+      priority: t.Optional(t.String()),
+      assigneeId: t.Optional(t.String())
     })
   })
   // Update requirement
   .put('/:id', async ({ params, body, set, user }) => {
-    const { title, description, status, priority } = body as { title?: string; description?: string; status?: string; priority?: string }
+    const { title, description, status, priority, assigneeId } = body as { title?: string; description?: string; status?: string; priority?: string; assigneeId?: string | null }
 
     const existing = await prisma.requirement.findUnique({ where: { id: params.id } })
     if (!existing) {
@@ -129,10 +145,30 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
       return { error: { code: 'FORBIDDEN', message: 'Permission denied' } }
     }
 
+    // Validate assignee is a project member if provided
+    if (assigneeId !== undefined && assigneeId !== null) {
+      const memberCheck = await prisma.projectMember.findFirst({
+        where: { projectId: existing.projectId, userId: assigneeId }
+      })
+      if (!memberCheck) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: '負責人必須是項目成員' } }
+      }
+    }
+
     const requirement = await prisma.requirement.update({
       where: { id: params.id },
-      data: { title, description, status, priority },
-      include: { createdBy: { select: { id: true, name: true } } }
+      data: {
+        title,
+        description,
+        status,
+        priority,
+        assigneeId: assigneeId === '' ? null : assigneeId
+      },
+      include: {
+        createdBy: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true } }
+      }
     })
 
     return { requirement }

@@ -1,19 +1,30 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, Folder, Edit2, Trash2 } from 'lucide-react'
-import { projectApi } from '../utils/api'
+import { projectApi, departmentApi } from '../utils/api'
 import type { Project } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
+import { hasAnyPermission } from '../utils/permissions'
+
+interface Department {
+  id: string
+  name: string
+}
 
 export default function ProjectsPage() {
   const { user } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [departmentId, setDepartmentId] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Department filter
+  const [filterDepartmentId, setFilterDepartmentId] = useState('')
 
   // Edit modal
   const [showEditModal, setShowEditModal] = useState(false)
@@ -21,17 +32,20 @@ export default function ProjectsPage() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editStatus, setEditStatus] = useState('')
+  const [editDepartmentId, setEditDepartmentId] = useState('')
   const [isEditing, setIsEditing] = useState(false)
 
   const navigate = useNavigate()
 
   useEffect(() => {
     loadProjects()
-  }, [])
+    loadDepartments()
+  }, [filterDepartmentId])
 
   const loadProjects = async () => {
     try {
-      const response = await projectApi.list()
+      const params = filterDepartmentId ? { departmentId: filterDepartmentId } : {}
+      const response = await projectApi.list(params)
       setProjects(response.data.projects)
     } catch (err) {
       console.error('Failed to load projects:', err)
@@ -40,11 +54,20 @@ export default function ProjectsPage() {
     }
   }
 
+  const loadDepartments = async () => {
+    try {
+      const res = await departmentApi.list()
+      setDepartments(res.data.departments || [])
+    } catch (err) {
+      console.error('Failed to load departments:', err)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
     try {
-      const response = await projectApi.create({ name, description })
+      const response = await projectApi.create({ name, description, departmentId: departmentId || undefined })
       navigate(`/projects/${response.data.project.id}`)
     } catch (err) {
       console.error('Failed to create project:', err)
@@ -68,6 +91,7 @@ export default function ProjectsPage() {
     setEditName(project.name)
     setEditDescription(project.description || '')
     setEditStatus(project.status)
+    setEditDepartmentId((project as any).department?.id || '')
     setShowEditModal(true)
   }
 
@@ -79,7 +103,8 @@ export default function ProjectsPage() {
       await projectApi.update(editingProject.id, {
         name: editName,
         description: editDescription,
-        status: editStatus
+        status: editStatus,
+        departmentId: editDepartmentId || undefined
       })
       setShowEditModal(false)
       loadProjects()
@@ -136,18 +161,38 @@ export default function ProjectsPage() {
         <div className="flex-1">
           <h1 className="text-3xl font-bold text-gray-900">項目列表</h1>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus size={20} />
-          新建項目
-        </button>
+        {user?.role === 'admin' && (
+          <select
+            value={filterDepartmentId}
+            onChange={(e) => {
+              setFilterDepartmentId(e.target.value)
+              loadProjects()
+            }}
+            className="input-field w-48"
+          >
+            <option value="">全部部門</option>
+            {departments.map(d => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        )}
+        {hasAnyPermission(user, ['projects.create']) && (
+          <button
+            onClick={() => { setDepartmentId(''); setShowForm(true) }}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus size={20} />
+            新建項目
+          </button>
+        )}
       </div>
 
-      {/* Loading */}
-      {isLoading && (
-        <div className="text-center py-12 text-gray-500">載入中...</div>
+      {/* Project List Cards - show department if admin */}
+      {!isLoading && projects.length > 0 && user?.role === 'admin' && (
+        <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
+          共 {projects.length} 個項目
+          {filterDepartmentId && ` · 已篩選部門：${departments.find(d => d.id === filterDepartmentId)?.name || '未知'}`}
+        </div>
       )}
 
       {/* Project List */}
@@ -201,6 +246,13 @@ export default function ProjectsPage() {
               {project.description && (
                 <p className="text-sm text-gray-500 mb-3 line-clamp-2">{project.description}</p>
               )}
+              {(project as any).department && (
+                <div className="mb-2">
+                  <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
+                    {(project as any).department.name}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center gap-4 text-xs text-gray-400">
                 <span>{project.memberCount || 0} 個成員</span>
                 <span>{project.requirementCount || 0} 個需求</span>
@@ -238,6 +290,21 @@ export default function ProjectsPage() {
                   placeholder="項目的詳細描述..."
                   rows={4}
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  部門
+                </label>
+                <select
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                  className="input-field"
+                >
+                  <option value="">無</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="flex gap-3 justify-end">
                 <button
@@ -302,6 +369,21 @@ export default function ProjectsPage() {
                   <option value="on_hold">暫停</option>
                   <option value="completed">已完成</option>
                   <option value="archived">已歸檔</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  部門
+                </label>
+                <select
+                  value={editDepartmentId}
+                  onChange={(e) => setEditDepartmentId(e.target.value)}
+                  className="input-field"
+                >
+                  <option value="">無</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
                 </select>
               </div>
               <div className="flex gap-3 justify-end">

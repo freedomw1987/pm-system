@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { FolderKanban, Plus, Users } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { projectApi } from '../utils/api'
+import { hasAnyPermission } from '../utils/permissions'
 import type { Project } from '../types'
 
 export default function DashboardPage() {
@@ -41,7 +42,7 @@ export default function DashboardPage() {
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">儀表板</h1>
           <p className="text-gray-500 mt-1">歡迎回來，{user?.name}</p>
         </div>
-        {(user?.role === 'admin' || user?.role === 'pm') && (
+        {hasAnyPermission(user, ['projects.create']) && (
           <Link to="/projects/new" className="btn-primary flex items-center gap-2 justify-center sm:justify-start w-full sm:w-auto">
             <Plus size={20} />
             <span>新建項目</span>
@@ -58,7 +59,7 @@ export default function DashboardPage() {
           <FolderKanban size={48} className="mx-auto text-gray-400 mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">暫無項目</h3>
           <p className="text-gray-500 mb-6">建立您的第一個項目開始管理工作</p>
-          {(user?.role === 'admin' || user?.role === 'pm') && (
+          {hasAnyPermission(user, ['projects.create']) && (
             <Link to="/projects/new" className="btn-primary inline-flex items-center gap-2">
               <Plus size={20} />
               新建項目

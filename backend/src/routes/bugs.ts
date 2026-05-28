@@ -10,6 +10,8 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
     if (query.taskId) where.taskId = query.taskId
     if (query.status) where.status = query.status
     if (query.reporterId) where.reporterId = query.reporterId
+    if (query.projectId) where.projectId = query.projectId
+    if (query.severity) where.severity = query.severity
     const and: any[] = []
     if (query.requirementId) {
       and.push({
@@ -20,10 +22,14 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
       })
     }
 
-    if (user && (user.role === 'tester' || user.role === 'developer')) {
+    // Check if user can view all bugs
+    const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'bugs.view_all'))
+
+    if (!canViewAll && (user?.role === 'tester' || user?.role === 'developer')) {
       and.push({
         OR: [
           { reporterId: user.id },
+          { assigneeId: user.id },
           { task: { assigneeId: user.id } }
         ]
       })
@@ -35,7 +41,8 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
       where,
       include: {
         reporter: { select: { id: true, name: true } },
-        task: { select: { id: true, title: true } }
+        task: { select: { id: true, title: true } },
+        project: { select: { id: true, name: true } }
       },
       orderBy: { createdAt: 'desc' }
     })

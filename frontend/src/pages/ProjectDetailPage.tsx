@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw } from 'lucide-react'
-import { projectApi, requirementApi, userApi, roleApi } from '../utils/api'
-import type { Project, Requirement, User, ProjectMember, Role } from '../types'
+import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle } from 'lucide-react'
+import { projectApi, requirementApi, taskApi, bugApi, userApi, roleApi } from '../utils/api'
+import { hasAnyPermission } from '../utils/permissions'
+import type { Project, Requirement, User, ProjectMember, Role, Task, Bug } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
 import WikiTab from '../components/WikiTab'
@@ -14,7 +15,9 @@ export default function ProjectDetailPage() {
   const { user } = useAuth()
   const [project, setProject] = useState<Project | null>(null)
   const [requirements, setRequirements] = useState<Requirement[]>([])
-  const [activeTab, setActiveTab] = useState<'requirements' | 'kanban' | 'members' | 'wiki' | 'attachments' | 'agents'>('requirements')
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [bugs, setBugs] = useState<Bug[]>([])
+  const [activeTab, setActiveTab] = useState<'requirements' | 'tasks' | 'bugs' | 'kanban' | 'members' | 'wiki' | 'attachments' | 'agents'>('requirements')
   const [isLoading, setIsLoading] = useState(true)
 
   // ── Add member ────────────────────────────────────────────────
@@ -34,7 +37,38 @@ export default function ProjectDetailPage() {
   const [newReqTitle, setNewReqTitle] = useState('')
   const [newReqDesc, setNewReqDesc] = useState('')
   const [newReqPriority, setNewReqPriority] = useState('medium')
+  const [newReqAssignee, setNewReqAssignee] = useState('')
   const [isAddingReq, setIsAddingReq] = useState(false)
+
+  // ── Task CRUD ────────────────────────────────────────────────
+  const [showAddTaskModal, setShowAddTaskModal] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskDesc, setNewTaskDesc] = useState('')
+  const [newTaskAssignee, setNewTaskAssignee] = useState('')
+  const [isAddingTask, setIsAddingTask] = useState(false)
+
+  // Edit task
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [editTaskTitle, setEditTaskTitle] = useState('')
+  const [editTaskDesc, setEditTaskDesc] = useState('')
+  const [editTaskAssignee, setEditTaskAssignee] = useState('')
+  const [editTaskStatus, setEditTaskStatus] = useState('')
+  const [isEditingTask, setIsEditingTask] = useState(false)
+
+  // ── Bug CRUD ────────────────────────────────────────────────
+  const [showAddBugModal, setShowAddBugModal] = useState(false)
+  const [newBugTitle, setNewBugTitle] = useState('')
+  const [newBugDesc, setNewBugDesc] = useState('')
+  const [newBugSeverity, setNewBugSeverity] = useState('medium')
+  const [isAddingBug, setIsAddingBug] = useState(false)
+
+  // Edit bug
+  const [editingBug, setEditingBug] = useState<Bug | null>(null)
+  const [editBugTitle, setEditBugTitle] = useState('')
+  const [editBugDesc, setEditBugDesc] = useState('')
+  const [editBugSeverity, setEditBugSeverity] = useState('')
+  const [editBugStatus, setEditBugStatus] = useState('')
+  const [isEditingBug, setIsEditingBug] = useState(false)
 
   // Edit requirement
   const [editingReq, setEditingReq] = useState<Requirement | null>(null)
@@ -49,12 +83,16 @@ export default function ProjectDetailPage() {
 
   const loadProject = async () => {
     try {
-      const [projectRes, reqRes] = await Promise.all([
+      const [projectRes, reqRes, tasksRes, bugsRes] = await Promise.all([
         projectApi.get(id!),
-        requirementApi.list(id!)
+        requirementApi.list(id!),
+        taskApi.list({ projectId: id }),
+        bugApi.list({ projectId: id })
       ])
       setProject(projectRes.data.project)
       setRequirements(reqRes.data.requirements)
+      setTasks(tasksRes.data.tasks || [])
+      setBugs(bugsRes.data.bugs || [])
     } catch (err) {
       console.error(err)
     } finally {
@@ -119,14 +157,127 @@ export default function ProjectDetailPage() {
     if (!newReqTitle.trim()) return
     setIsAddingReq(true)
     try {
-      await requirementApi.create(id!, { title: newReqTitle, description: newReqDesc, priority: newReqPriority })
+      await requirementApi.create(id!, { title: newReqTitle, description: newReqDesc, priority: newReqPriority, assigneeId: newReqAssignee || undefined })
       setShowAddReqModal(false)
-      setNewReqTitle(''); setNewReqDesc(''); setNewReqPriority('medium')
+      setNewReqTitle(''); setNewReqDesc(''); setNewReqPriority('medium'); setNewReqAssignee('')
       loadProject()
     } catch (err) {
       console.error(err)
     } finally {
       setIsAddingReq(false)
+    }
+  }
+
+  // ── Task actions ─────────────────────────────────────────────
+  const handleAddTask = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newTaskTitle.trim()) return
+    setIsAddingTask(true)
+    try {
+      const payload = { title: newTaskTitle, description: newTaskDesc, projectId: id, assigneeId: newTaskAssignee || undefined }
+      await taskApi.create(payload)
+      setShowAddTaskModal(false)
+      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee('')
+      loadProject()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setIsAddingTask(false)
+    }
+  }
+
+  // ── Bug actions ──────────────────────────────────────────────
+  const handleAddBug = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newBugTitle.trim()) return
+    setIsAddingBug(true)
+    try {
+      await bugApi.create({ title: newBugTitle, description: newBugDesc, severity: newBugSeverity, projectId: id })
+      setShowAddBugModal(false)
+      setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium')
+      loadProject()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setIsAddingBug(false)
+    }
+  }
+
+  // ── Task edit/delete actions ────────────────────────────────
+  const openEditTask = (task: Task) => {
+    setEditingTask(task)
+    setEditTaskTitle(task.title)
+    setEditTaskDesc(task.description || '')
+    setEditTaskAssignee(task.assignee?.id || '')
+    setEditTaskStatus(task.status)
+  }
+
+  const handleEditTask = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingTask) return
+    setIsEditingTask(true)
+    try {
+      const payload: any = { title: editTaskTitle, description: editTaskDesc, status: editTaskStatus }
+      if (editTaskAssignee) payload.assigneeId = editTaskAssignee
+      else payload.assigneeId = null // unassign
+      await taskApi.update(editingTask.id, payload)
+      setEditingTask(null)
+      loadProject()
+    } catch (err) {
+      console.error(err)
+      alert('無法更新任務')
+    } finally {
+      setIsEditingTask(false)
+    }
+  }
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!confirm('確定要刪除這個任務嗎？')) return
+    try {
+      await taskApi.delete(taskId)
+      loadProject()
+    } catch (err) {
+      console.error(err)
+      alert('無法刪除任務')
+    }
+  }
+
+  // ── Bug edit/delete actions ──────────────────────────────────
+  const openEditBug = (bug: Bug) => {
+    setEditingBug(bug)
+    setEditBugTitle(bug.title)
+    setEditBugDesc(bug.description || '')
+    setEditBugSeverity(bug.severity)
+    setEditBugStatus(bug.status)
+  }
+
+  const handleEditBug = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingBug) return
+    setIsEditingBug(true)
+    try {
+      await bugApi.update(editingBug.id, {
+        description: editBugDesc,
+        status: editBugStatus
+      })
+      setEditingBug(null)
+      loadProject()
+    } catch (err) {
+      console.error(err)
+      alert('無法更新缺陷')
+    } finally {
+      setIsEditingBug(false)
+    }
+  }
+
+  const handleDeleteBug = async (bugId: string) => {
+    if (!confirm('確定要刪除這個缺陷嗎？')) return
+    try {
+      await bugApi.delete(bugId)
+      loadProject()
+    } catch (err) {
+      console.error(err)
+      alert('無法刪除缺陷')
     }
   }
 
@@ -171,9 +322,9 @@ export default function ProjectDetailPage() {
   }
 
   // ── Helpers ──────────────────────────────────────────────────
-  const canManageMembers = user?.role === 'admin' || project?.members?.some(m => m.user.id === user?.id && m.role === 'pm')
-  const canEditReq = (_req: Requirement) => user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead'
-  const canDeleteReq = (_req: Requirement) => user?.role === 'admin' || user?.role === 'pm'
+  const canManageMembers = hasAnyPermission(user, ['projects.edit']) || project?.members?.some(m => m.user.id === user?.id && m.role === 'pm')
+  const canEditReq = (_req: Requirement) => hasAnyPermission(user, ['requirements.edit'])
+  const canDeleteReq = (_req: Requirement) => hasAnyPermission(user, ['requirements.delete'])
 
   const getPriorityColor = (p: string) => {
     switch (p) {
@@ -190,6 +341,10 @@ export default function ProjectDetailPage() {
       case 'pending': return 'bg-yellow-100 text-yellow-700'
       case 'in_progress': return 'bg-blue-100 text-blue-700'
       case 'completed': return 'bg-green-100 text-green-700'
+      case 'open': return 'bg-red-100 text-red-700'
+      case 'resolved': return 'bg-green-100 text-green-700'
+      case 'verified': return 'bg-primary-100 text-primary-700'
+      case 'testing': return 'bg-yellow-100 text-yellow-700'
       default: return 'bg-gray-100 text-gray-600'
     }
   }
@@ -199,7 +354,31 @@ export default function ProjectDetailPage() {
       case 'pending': return '待處理'
       case 'in_progress': return '進行中'
       case 'completed': return '已完成'
+      case 'open': return '已開啟'
+      case 'resolved': return '已修復'
+      case 'verified': return '已驗證'
+      case 'testing': return '測試中'
       default: return status
+    }
+  }
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'low': return 'bg-gray-100 text-gray-600'
+      case 'medium': return 'bg-yellow-100 text-yellow-700'
+      case 'high': return 'bg-orange-100 text-orange-700'
+      case 'critical': return 'bg-red-100 text-red-700'
+      default: return 'bg-gray-100 text-gray-600'
+    }
+  }
+
+  const getSeverityLabel = (severity: string) => {
+    switch (severity) {
+      case 'low': return '輕微'
+      case 'medium': return '中等'
+      case 'high': return '高'
+      case 'critical': return '嚴重'
+      default: return severity
     }
   }
 
@@ -220,7 +399,7 @@ export default function ProjectDetailPage() {
   return (
     <div>
       {/* Agent Activity Banner - Always visible for PM/Admin */}
-      {(user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead') && (
+      {hasAnyPermission(user, ['tasks.view']) && (
         <AgentActivityBanner projectId={id!} />
       )}
 
@@ -240,6 +419,12 @@ export default function ProjectDetailPage() {
         <button onClick={() => setActiveTab('requirements')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'requirements' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <FileText size={18} className="inline mr-2" />需求 ({requirements.length})
         </button>
+        <button onClick={() => setActiveTab('tasks')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'tasks' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
+          <CheckCircle size={18} className="inline mr-2" />任務 ({tasks.length})
+        </button>
+        <button onClick={() => setActiveTab('bugs')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'bugs' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
+          <AlertTriangle size={18} className="inline mr-2" />缺陷 ({bugs.length})
+        </button>
         <button onClick={() => setActiveTab('kanban')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'kanban' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <LayoutGrid size={18} className="inline mr-2" />看板
         </button>
@@ -252,7 +437,7 @@ export default function ProjectDetailPage() {
         <button onClick={() => setActiveTab('attachments')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'attachments' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <Paperclip size={18} className="inline mr-2" />附件
         </button>
-        {(user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead') && (
+        {hasAnyPermission(user, ['tasks.view']) && (
           <button onClick={() => setActiveTab('agents')} className={`pb-3 px-2 font-medium transition-colors whitespace-nowrap ${activeTab === 'agents' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <Bot size={18} className="inline mr-2" />Agent 任務
           </button>
@@ -262,7 +447,7 @@ export default function ProjectDetailPage() {
       {/* Requirements Tab */}
       {activeTab === 'requirements' && (
         <div>
-          {(user?.role === 'admin' || user?.role === 'pm') && (
+          {hasAnyPermission(user, ['requirements.create']) && (
             <button onClick={() => { setNewReqTitle(''); setNewReqDesc(''); setShowAddReqModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
               <Plus size={20} /><span>新建需求</span>
             </button>
@@ -309,6 +494,113 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {/* Tasks Tab */}
+      {activeTab === 'tasks' && (
+        <div>
+          {hasAnyPermission(user, ['tasks.create']) && (
+            <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setShowAddTaskModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
+              <Plus size={20} /><span>新建任務</span>
+            </button>
+          )}
+          {tasks.length === 0 ? (
+            <div className="card p-12 text-center">
+              <CheckCircle size={48} className="mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">暫無任務</h3>
+              <p className="text-gray-500">點擊上方按鈕創建任務</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {tasks.map((task) => (
+                <div key={task.id} className="card p-5 hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <h4 className="font-medium text-gray-900">{task.title}</h4>
+                        <span className={`badge ${getStatusColor(task.status)}`}>{getStatusLabel(task.status)}</span>
+                      </div>
+                      {task.description && (
+                        <p className="text-gray-500 text-sm truncate">{stripHtml(task.description)}</p>
+                      )}
+                      {task.assignee && (
+                        <p className="text-gray-400 text-xs mt-1">負責人：{task.assignee.name}</p>
+                      )}
+                      {task.requirements && task.requirements.length > 0 && (
+                        <p className="text-gray-400 text-xs mt-1">需求：{task.requirements.map(r => r.requirement?.title).filter(Boolean).join(', ')}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {hasAnyPermission(user, ['tasks.edit']) && (
+                        <button onClick={() => openEditTask(task)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="編輯">
+                          <Edit2 size={16} />
+                        </button>
+                      )}
+                      {hasAnyPermission(user, ['tasks.delete']) && (
+                        <button onClick={() => handleDeleteTask(task.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="刪除">
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bugs Tab */}
+      {activeTab === 'bugs' && (
+        <div>
+          {hasAnyPermission(user, ['bugs.create']) && (
+            <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
+              <Plus size={20} /><span>新建缺陷</span>
+            </button>
+          )}
+          {bugs.length === 0 ? (
+            <div className="card p-12 text-center">
+              <AlertTriangle size={48} className="mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">暫無缺陷</h3>
+              <p className="text-gray-500">點擊上方按鈕回報缺陷</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {bugs.map((bug) => (
+                <div key={bug.id} className="card p-5 hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
+                        <h4 className="font-medium text-gray-900">{bug.title}</h4>
+                        <span className={`badge ${getStatusColor(bug.status)}`}>{getStatusLabel(bug.status)}</span>
+                        <span className={`badge ${getSeverityColor(bug.severity)}`}>{getSeverityLabel(bug.severity)}</span>
+                      </div>
+                      {bug.description && (
+                        <p className="text-gray-500 text-sm truncate">{stripHtml(bug.description)}</p>
+                      )}
+                      {bug.reporter && (
+                        <p className="text-gray-400 text-xs mt-1">回報人：{bug.reporter.name}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {hasAnyPermission(user, ['bugs.edit']) && (
+                        <button onClick={() => openEditBug(bug)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="編輯">
+                          <Edit2 size={16} />
+                        </button>
+                      )}
+                      {hasAnyPermission(user, ['bugs.delete']) && (
+                        <button onClick={() => handleDeleteBug(bug.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="刪除">
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Kanban Tab */}
       {activeTab === 'kanban' && (
         <ProjectKanban projectId={id!} />
@@ -316,135 +608,242 @@ export default function ProjectDetailPage() {
 
       {/* Members Tab */}
       {activeTab === 'members' && (
-        <div>
-          {canManageMembers && (
-            <button onClick={openAddMember} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
-              <Plus size={20} /><span>新增成員</span>
-            </button>
-          )}
-          <div className="card">
-            <div className="p-4 border-b border-gray-100">
-              <h3 className="font-semibold text-gray-900">項目成員</h3>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {project.members?.map((member) => (
-                <div key={member.id} className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
-                      <span className="text-primary-600 font-medium">{member.user.name.charAt(0)}</span>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">{member.user.name}</p>
-                      <p className="text-sm text-gray-500">{member.user.email}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {editingMemberId === member.id ? (
-                      <>
-                        <select value={editingRole} onChange={(e) => setEditingRole(e.target.value)} className="input-field py-1 text-sm w-32">
-                          {availableRoles.map(r => (
-                            <option key={r.id} value={r.name}>{r.name}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => handleUpdateMemberRole(member)} className="btn-primary py-1 px-3 text-sm">儲存</button>
-                        <button onClick={() => setEditingMemberId(null)} className="btn-secondary py-1 px-3 text-sm">取消</button>
-                      </>
-                    ) : (
-                      <>
-                        <span className={`badge ${roleColor(member.role)}`}>{roleLabel(member.role)}</span>
-                        {canManageMembers && member.user.id !== user?.id && (
-                          <>
-                            <button onClick={() => { setEditingMemberId(member.id); setEditingRole(member.role) }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="變更角色">
-                              <Edit2 size={16} />
-                            </button>
-                            <button onClick={() => handleRemoveMember(member.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="移除成員">
-                              <UserMinus size={16} />
-                            </button>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <MembersTab
+          project={project}
+          canManageMembers={canManageMembers}
+          user={user}
+          editingMemberId={editingMemberId}
+          setEditingMemberId={setEditingMemberId}
+          editingRole={editingRole}
+          setEditingRole={setEditingRole}
+          availableRoles={availableRoles}
+          handleUpdateMemberRole={handleUpdateMemberRole}
+          handleRemoveMember={handleRemoveMember}
+          openAddMember={openAddMember}
+          showAddMember={showAddMember}
+          setShowAddMember={setShowAddMember}
+          allUsers={allUsers}
+          selectedUserId={selectedUserId}
+          setSelectedUserId={setSelectedUserId}
+          selectedRole={selectedRole}
+          setSelectedRole={setSelectedRole}
+          isAddingMember={isAddingMember}
+          handleAddMember={handleAddMember}
+          roleColor={roleColor}
+          roleLabel={roleLabel}
+        />
       )}
 
       {/* Wiki Tab */}
       {activeTab === 'wiki' && (
-        <WikiTab projectId={id!} />
+        <WikiTabComponent projectId={id!} />
       )}
 
       {/* Attachments Tab */}
       {activeTab === 'attachments' && (
-        <AttachmentsTab projectId={id!} />
+        <AttachmentsTabComponent projectId={id!} />
       )}
 
       {/* Agent Monitoring Tab */}
       {activeTab === 'agents' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Agent Task List */}
-          <div className="lg:col-span-3">
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-4 border-b flex items-center justify-between">
-                <h2 className="font-semibold flex items-center gap-2">
-                  <Bot className="w-5 h-5 text-purple-600" />
-                  AI Agent 任務列表
-                </h2>
-                <button onClick={() => { window.location.reload() }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="刷新">
-                  <RefreshCw size={16} />
-                </button>
-              </div>
-
-              {/* Show project tasks assigned to agents */}
-              <AgentTasksList projectId={id!} />
-            </div>
-          </div>
-        </div>
+        <AgentMonitoringTab id={id!} />
       )}
 
-      {/* Add Member Modal */}
-      {showAddMember && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">新增項目成員</h2>
-              <button onClick={() => setShowAddMember(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleAddMember} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">選擇用戶 *</label>
-                <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)} className="input-field" required>
-                  <option value="">-- 選擇用戶 --</option>
-                  {allUsers.map(u => (
-                    <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
-                  ))}
-                </select>
-                {allUsers.length === 0 && <p className="text-xs text-gray-500 mt-1">所有用戶已在此項目中</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">項目角色 *</label>
-                <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="input-field" required>
-                  <option value="">-- 選擇角色 --</option>
-                  {availableRoles.map(r => (
-                    <option key={r.id} value={r.name}>{r.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => setShowAddMember(false)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isAddingMember || !selectedUserId} className="btn-primary">
-                  {isAddingMember ? '新增中...' : '新增'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Modals */}
+      <AddTaskModal
+        showAddTaskModal={showAddTaskModal} setShowAddTaskModal={setShowAddTaskModal}
+        newTaskTitle={newTaskTitle} setNewTaskTitle={setNewTaskTitle}
+        newTaskDesc={newTaskDesc} setNewTaskDesc={setNewTaskDesc}
+        newTaskAssignee={newTaskAssignee} setNewTaskAssignee={setNewTaskAssignee}
+        isAddingTask={isAddingTask} handleAddTask={handleAddTask}
+        project={project}
+      />
+      <AddBugModal
+        showAddBugModal={showAddBugModal} setShowAddBugModal={setShowAddBugModal}
+        newBugTitle={newBugTitle} setNewBugTitle={setNewBugTitle}
+        newBugDesc={newBugDesc} setNewBugDesc={setNewBugDesc}
+        newBugSeverity={newBugSeverity} setNewBugSeverity={setNewBugSeverity}
+        isAddingBug={isAddingBug} handleAddBug={handleAddBug}
+      />
+      <EditTaskModal
+        editingTask={editingTask} setEditingTask={setEditingTask}
+        editTaskTitle={editTaskTitle} setEditTaskTitle={setEditTaskTitle}
+        editTaskDesc={editTaskDesc} setEditTaskDesc={setEditTaskDesc}
+        editTaskAssignee={editTaskAssignee} setEditTaskAssignee={setEditTaskAssignee}
+        editTaskStatus={editTaskStatus} setEditTaskStatus={setEditTaskStatus}
+        isEditingTask={isEditingTask} handleEditTask={handleEditTask}
+        project={project}
+      />
+      <EditBugModal
+        editingBug={editingBug} setEditingBug={setEditingBug}
+        editBugTitle={editBugTitle} setEditBugTitle={setEditBugTitle}
+        editBugDesc={editBugDesc} setEditBugDesc={setEditBugDesc}
+        editBugSeverity={editBugSeverity} setEditBugSeverity={setEditBugSeverity}
+        editBugStatus={editBugStatus} setEditBugStatus={setEditBugStatus}
+        isEditingBug={isEditingBug} handleEditBug={handleEditBug}
+      />
+      <AddMemberModal
+        showAddMember={showAddMember} setShowAddMember={setShowAddMember}
+        allUsers={allUsers} selectedUserId={selectedUserId} setSelectedUserId={setSelectedUserId}
+        selectedRole={selectedRole} setSelectedRole={setSelectedRole}
+        availableRoles={availableRoles}
+        isAddingMember={isAddingMember} handleAddMember={handleAddMember}
+      />
+      <RequirementModals
+        showAddReqModal={showAddReqModal} setShowAddReqModal={setShowAddReqModal}
+        newReqTitle={newReqTitle} setNewReqTitle={setNewReqTitle}
+        newReqDesc={newReqDesc} setNewReqDesc={setNewReqDesc}
+        newReqPriority={newReqPriority} setNewReqPriority={setNewReqPriority}
+        newReqAssignee={newReqAssignee} setNewReqAssignee={setNewReqAssignee}
+        isAddingReq={isAddingReq} handleAddRequirement={handleAddRequirement}
+        editingReq={editingReq} setEditingReq={setEditingReq}
+        editReqTitle={editReqTitle} setEditReqTitle={setEditReqTitle}
+        editReqDesc={editReqDesc} setEditReqDesc={setEditReqDesc}
+        editReqPriority={editReqPriority} setEditReqPriority={setEditReqPriority}
+        isEditingReq={isEditingReq} handleEditRequirement={handleEditRequirement}
+        projectMembers={project?.members}
+      />
+    </div>
+  )
+}
 
-      {/* Add Requirement Modal */}
+// ── Add Member Modal ──────────────────────────────────────────────────────
+function AddMemberModal({ showAddMember, setShowAddMember, allUsers, selectedUserId, setSelectedUserId, selectedRole, setSelectedRole, availableRoles, isAddingMember, handleAddMember }: any) {
+  if (!showAddMember) return null
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">新增項目成員</h2>
+          <button onClick={() => setShowAddMember(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleAddMember} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">選擇用戶 *</label>
+            <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)} className="input-field" required>
+              <option value="">-- 選擇用戶 --</option>
+              {allUsers.map((u: any) => (
+                <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+              ))}
+            </select>
+            {allUsers.length === 0 && <p className="text-xs text-gray-500 mt-1">所有用戶已在此項目中</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">項目角色 *</label>
+            <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} className="input-field" required>
+              <option value="">-- 選擇角色 --</option>
+              {availableRoles.map((r: any) => (
+                <option key={r.id} value={r.name}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button type="button" onClick={() => setShowAddMember(false)} className="btn-secondary">取消</button>
+            <button type="submit" disabled={isAddingMember} className="btn-primary">{isAddingMember ? '添加中...' : '添加'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Members Tab Component ────────────────────────────────────────────────
+function MembersTab({ project, canManageMembers, user, editingMemberId, setEditingMemberId, editingRole, setEditingRole, availableRoles, handleUpdateMemberRole, handleRemoveMember, openAddMember, showAddMember, setShowAddMember, allUsers, selectedUserId, setSelectedUserId, selectedRole, setSelectedRole, isAddingMember, handleAddMember, roleColor, roleLabel }: any) {
+  if (!project) return null
+  return (
+    <div>
+      {canManageMembers && (
+        <button onClick={openAddMember} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
+          <Plus size={20} /><span>新增成員</span>
+        </button>
+      )}
+      <div className="card">
+        <div className="p-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">項目成員</h3>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {project.members?.map((member: any) => (
+            <div key={member.id} className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
+                  <span className="text-primary-600 font-medium">{member.user.name.charAt(0)}</span>
+                </div>
+                <div>
+                  <p className="font-medium text-gray-900">{member.user.name}</p>
+                  <p className="text-sm text-gray-500">{member.user.email}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {editingMemberId === member.id ? (
+                  <>
+                    <select value={editingRole} onChange={(e) => setEditingRole(e.target.value)} className="input-field py-1 text-sm w-32">
+                      {availableRoles.map((r: any) => (
+                        <option key={r.id} value={r.name}>{r.name}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => handleUpdateMemberRole(member)} className="btn-primary py-1 px-3 text-sm">儲存</button>
+                    <button onClick={() => setEditingMemberId(null)} className="btn-secondary py-1 px-3 text-sm">取消</button>
+                  </>
+                ) : (
+                  <>
+                    <span className={`badge ${roleColor(member.role)}`}>{roleLabel(member.role)}</span>
+                    {canManageMembers && member.user.id !== user?.id && (
+                      <>
+                        <button onClick={() => { setEditingMemberId(member.id); setEditingRole(member.role) }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="變更角色">
+                          <Edit2 size={16} />
+                        </button>
+                        <button onClick={() => handleRemoveMember(member.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="移除成員">
+                          <UserMinus size={16} />
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Wiki Tab Component ───────────────────────────────────────────────────
+function WikiTabComponent({ projectId }: { projectId: string }) {
+  return <WikiTab projectId={projectId} />
+}
+
+// ── Attachments Tab Component ───────────────────────────────────────────
+function AttachmentsTabComponent({ projectId }: { projectId: string }) {
+  return <AttachmentsTab projectId={projectId} />
+}
+
+// ── Agent Monitoring Tab Component ──────────────────────────────────────
+function AgentMonitoringTab({ id }: { id: string }) {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="lg:col-span-3">
+        <div className="bg-white rounded-lg shadow">
+          <div className="p-4 border-b flex items-center justify-between">
+            <h2 className="font-semibold flex items-center gap-2">
+              <Bot className="w-5 h-5 text-purple-600" />
+              AI Agent 任務列表
+            </h2>
+            <button onClick={() => { window.location.reload() }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="刷新">
+              <RefreshCw size={16} />
+            </button>
+          </div>
+          <AgentTasksList projectId={id} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Requirement Modals Component ───────────────────────────────────────
+function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, setNewReqTitle, newReqDesc, setNewReqDesc, newReqPriority, setNewReqPriority, newReqAssignee, setNewReqAssignee, isAddingReq, handleAddRequirement, editingReq, setEditingReq, editReqTitle, setEditReqTitle, editReqDesc, setEditReqDesc, editReqPriority, setEditReqPriority, isEditingReq, handleEditRequirement, projectMembers }: any) {
+  return (
+    <>
       {showAddReqModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -461,13 +860,24 @@ export default function ProjectDetailPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
                 <RichTextEditor value={newReqDesc} onChange={setNewReqDesc} placeholder="需求的詳細描述..." rows={6} />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
-                <select value={newReqPriority} onChange={(e) => setNewReqPriority(e.target.value)} className="input-field">
-                  <option value="high">優先</option>
-                  <option value="medium">中等</option>
-                  <option value="low">較低</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
+                  <select value={newReqPriority} onChange={(e) => setNewReqPriority(e.target.value)} className="input-field">
+                    <option value="high">優先</option>
+                    <option value="medium">中等</option>
+                    <option value="low">較低</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+                  <select value={newReqAssignee} onChange={(e) => setNewReqAssignee(e.target.value)} className="input-field">
+                    <option value="">-- 不指定 --</option>
+                    {projectMembers?.map((m: any) => (
+                      <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="flex gap-3 justify-end">
                 <button type="button" onClick={() => setShowAddReqModal(false)} className="btn-secondary">取消</button>
@@ -478,7 +888,6 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Edit Requirement Modal */}
       {editingReq && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -511,7 +920,7 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -674,6 +1083,184 @@ function AgentTasksList({ projectId }: { projectId: string }) {
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ── Add Task Modal ──────────────────────────────────────────────────────
+function AddTaskModal({ showAddTaskModal, setShowAddTaskModal, newTaskTitle, setNewTaskTitle, newTaskDesc, setNewTaskDesc, newTaskAssignee, setNewTaskAssignee, isAddingTask, handleAddTask, project }: any) {
+  if (!showAddTaskModal) return null
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">新建任務</h2>
+          <button onClick={() => setShowAddTaskModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+        <form onSubmit={handleAddTask} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">任務標題 *</label>
+            <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="input-field" placeholder="輸入任務標題" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">任務描述</label>
+            <textarea value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} className="input-field" rows={3} placeholder="輸入任務描述（可選）" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+            <select value={newTaskAssignee} onChange={(e) => setNewTaskAssignee(e.target.value)} className="input-field">
+              <option value="">未指定</option>
+              {project?.members?.map((m: any) => (
+                <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button type="button" onClick={() => setShowAddTaskModal(false)} className="btn-secondary">取消</button>
+            <button type="submit" disabled={isAddingTask} className="btn-primary">{isAddingTask ? '創建中...' : '創建'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Add Bug Modal ──────────────────────────────────────────────────────
+function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewBugTitle, newBugDesc, setNewBugDesc, newBugSeverity, setNewBugSeverity, isAddingBug, handleAddBug }: any) {
+  if (!showAddBugModal) return null
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">新建缺陷</h2>
+          <button onClick={() => setShowAddBugModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+        <form onSubmit={handleAddBug} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">缺陷標題 *</label>
+            <input type="text" value={newBugTitle} onChange={(e) => setNewBugTitle(e.target.value)} className="input-field" placeholder="輸入缺陷標題" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">缺陷描述</label>
+            <textarea value={newBugDesc} onChange={(e) => setNewBugDesc(e.target.value)} className="input-field" rows={3} placeholder="輸入缺陷描述（可選）" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
+            <select value={newBugSeverity} onChange={(e) => setNewBugSeverity(e.target.value)} className="input-field">
+              <option value="low">輕微</option>
+              <option value="medium">中等</option>
+              <option value="high">嚴重</option>
+              <option value="critical">危急</option>
+            </select>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button type="button" onClick={() => setShowAddBugModal(false)} className="btn-secondary">取消</button>
+            <button type="submit" disabled={isAddingBug} className="btn-primary">{isAddingBug ? '創建中...' : '創建'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Task Modal ──────────────────────────────────────────────────────
+function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTaskTitle, editTaskDesc, setEditTaskDesc, editTaskAssignee, setEditTaskAssignee, editTaskStatus, setEditTaskStatus, isEditingTask, handleEditTask, project }: any) {
+  if (!editingTask) return null
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">編輯任務</h2>
+          <button onClick={() => setEditingTask(null)} className="p-1 text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+        <form onSubmit={handleEditTask} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">任務標題 *</label>
+            <input type="text" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="input-field" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">任務描述</label>
+            <textarea value={editTaskDesc} onChange={(e) => setEditTaskDesc(e.target.value)} className="input-field" rows={3} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+            <select value={editTaskAssignee} onChange={(e) => setEditTaskAssignee(e.target.value)} className="input-field">
+              <option value="">未指定</option>
+              {project?.members?.map((m: any) => (
+                <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+            <select value={editTaskStatus} onChange={(e) => setEditTaskStatus(e.target.value)} className="input-field">
+              <option value="pending">待處理</option>
+              <option value="in_progress">進行中</option>
+              <option value="completed">已完成</option>
+            </select>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button type="button" onClick={() => setEditingTask(null)} className="btn-secondary">取消</button>
+            <button type="submit" disabled={isEditingTask} className="btn-primary">{isEditingTask ? '保存中...' : '保存'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Bug Modal ──────────────────────────────────────────────────────
+function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle, editBugDesc, setEditBugDesc, editBugSeverity, setEditBugSeverity, editBugStatus, setEditBugStatus, isEditingBug, handleEditBug }: any) {
+  if (!editingBug) return null
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">編輯缺陷</h2>
+          <button onClick={() => setEditingBug(null)} className="p-1 text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+        <form onSubmit={handleEditBug} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">缺陷標題 *</label>
+            <input type="text" value={editBugTitle} onChange={(e) => setEditBugTitle(e.target.value)} className="input-field" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">缺陷描述</label>
+            <textarea value={editBugDesc} onChange={(e) => setEditBugDesc(e.target.value)} className="input-field" rows={3} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
+            <select value={editBugSeverity} onChange={(e) => setEditBugSeverity(e.target.value)} className="input-field">
+              <option value="low">輕微</option>
+              <option value="medium">中等</option>
+              <option value="high">嚴重</option>
+              <option value="critical">危急</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+            <select value={editBugStatus} onChange={(e) => setEditBugStatus(e.target.value)} className="input-field">
+              <option value="open">待處理</option>
+              <option value="in_progress">處理中</option>
+              <option value="resolved">已修復</option>
+              <option value="verified">已驗證</option>
+              <option value="closed">已關閉</option>
+            </select>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button type="button" onClick={() => setEditingBug(null)} className="btn-secondary">取消</button>
+            <button type="submit" disabled={isEditingBug} className="btn-primary">{isEditingBug ? '保存中...' : '保存'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

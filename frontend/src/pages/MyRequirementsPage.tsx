@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FileText, CheckCircle, Edit2, Trash2, X, Plus } from 'lucide-react'
 import { requirementApi, projectApi } from '../utils/api'
+import { hasAnyPermission } from '../utils/permissions'
 import type { Requirement, Project } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
@@ -114,8 +115,8 @@ export default function MyRequirementsPage() {
   }
 
   // ── Helpers ───────────────────────────────────────────────────
-  const canEdit = user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead'
-  const canDelete = user?.role === 'admin' || user?.role === 'pm'
+  const canEdit = hasAnyPermission(user, ['requirements.edit'])
+  const canDelete = hasAnyPermission(user, ['requirements.delete'])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -164,7 +165,7 @@ export default function MyRequirementsPage() {
           <h1 className="text-3xl font-bold text-gray-900">我的需求</h1>
           <p className="text-gray-500 mt-1">我所在項目的全部需求</p>
         </div>
-        {(user?.role === 'admin' || user?.role === 'pm') && (
+        {hasAnyPermission(user, ['requirements.create']) && (
           <button
             onClick={() => {
               setNewTitle(''); setNewDesc(''); setNewPriority('medium'); setNewProjectId('')

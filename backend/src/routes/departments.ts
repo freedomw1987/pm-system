@@ -32,8 +32,11 @@ function requireAdmin(user: { role?: string } | null | undefined, set: any) {
 
 const departmentRoutes = new Elysia()
   .get('/departments', async ({ set, user }) => {
-    const forbidden = requireAdmin(user, set)
-    if (forbidden) return forbidden
+    // Allow any authenticated user to view departments (for project creation)
+    if (!user) {
+      set.status = 401
+      return { error: { code: 'UNAUTHORIZED', message: 'Login required' } }
+    }
 
     const { prisma } = await import('../utils/prisma')
     await seedDepartments(prisma)

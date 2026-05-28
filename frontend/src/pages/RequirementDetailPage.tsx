@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Plus, CheckCircle, Bug as BugIcon, AlertTriangle, Edit2, Trash2, X, Clock, Bot } from 'lucide-react'
 import { requirementApi, taskApi, bugApi, projectApi, workLogApi } from '../utils/api'
+import { hasAnyPermission } from '../utils/permissions'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
 import type { Requirement, Task, Bug, User } from '../types'
@@ -24,6 +25,7 @@ export default function RequirementDetailPage() {
   const [editReqDesc, setEditReqDesc] = useState('')
   const [editReqStatus, setEditReqStatus] = useState('')
   const [editReqPriority, setEditReqPriority] = useState('')
+  const [editReqAssignee, setEditReqAssignee] = useState('')
   const [isEditingReq, setIsEditingReq] = useState(false)
 
   // ── Task CRUD ─────────────────────────────────────────────────
@@ -118,6 +120,7 @@ export default function RequirementDetailPage() {
     setEditReqDesc(requirement.description || '')
     setEditReqStatus(requirement.status)
     setEditReqPriority(requirement.priority || 'medium')
+    setEditReqAssignee((requirement as any).assignee?.id || '')
     setShowEditReq(true)
   }
 
@@ -125,7 +128,13 @@ export default function RequirementDetailPage() {
     e.preventDefault()
     setIsEditingReq(true)
     try {
-      await requirementApi.update(id!, { title: editReqTitle, description: editReqDesc, status: editReqStatus, priority: editReqPriority })
+      await requirementApi.update(id!, {
+        title: editReqTitle,
+        description: editReqDesc,
+        status: editReqStatus,
+        priority: editReqPriority,
+        assigneeId: editReqAssignee || undefined
+      })
       setShowEditReq(false)
       loadData()
     } catch (err) {
@@ -443,10 +452,10 @@ export default function RequirementDetailPage() {
   }
 
   // ── Helpers ───────────────────────────────────────────────────
-  const canEditReq = user?.role === 'admin' || user?.role === 'pm' || user?.role === 'tech_lead'
-  const canEditTask = user?.role === 'admin' || user?.role === 'tech_lead'
-  const canDeleteTask = user?.role === 'admin' || user?.role === 'tech_lead'
-  const canDeleteBug = user?.role === 'admin'
+  const canEditReq = hasAnyPermission(user, ['requirements.edit'])
+  const canEditTask = hasAnyPermission(user, ['tasks.edit'])
+  const canDeleteTask = hasAnyPermission(user, ['tasks.delete'])
+  const canDeleteBug = hasAnyPermission(user, ['bugs.delete'])
 
   const getPriorityColor = (p: string) => {
     switch (p) {
@@ -537,9 +546,14 @@ export default function RequirementDetailPage() {
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-gray-900">{requirement.title}</h1>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className={`badge ${getStatusColor(requirement.status)}`}>{getStatusLabel(requirement.status)}</span>
               <span className={`badge ${getPriorityColor(requirement.priority)}`}>{getPriorityLabel(requirement.priority)}</span>
+              {(requirement as any).assignee && (
+                <span className="badge bg-purple-100 text-purple-700">
+                  負責人：{(requirement as any).assignee.name}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -576,7 +590,7 @@ export default function RequirementDetailPage() {
       {/* Tasks Tab */}
       {activeTab === 'tasks' && (
         <div>
-          {(user?.role === 'admin' || user?.role === 'tech_lead') && (
+          {hasAnyPermission(user, ['tasks.create']) && (
             <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setShowAddTask(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
               <Plus size={20} /><span>新建任務</span>
             </button>
@@ -660,7 +674,7 @@ export default function RequirementDetailPage() {
       {/* Bugs Tab */}
       {activeTab === 'bugs' && (
         <div>
-          {(user?.role === 'admin' || user?.role === 'tester') && (
+          {hasAnyPermission(user, ['bugs.create']) && (
             <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setShowAddBug(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
               <Plus size={20} /><span>新建缺陷</span>
             </button>
@@ -746,7 +760,7 @@ export default function RequirementDetailPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
                 <RichTextEditor value={editReqDesc} onChange={setEditReqDesc} rows={6} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
                   <select value={editReqStatus} onChange={(e) => setEditReqStatus(e.target.value)} className="input-field w-full">
@@ -761,6 +775,15 @@ export default function RequirementDetailPage() {
                     <option value="high">優先</option>
                     <option value="medium">中等</option>
                     <option value="low">較低</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+                  <select value={editReqAssignee} onChange={(e) => setEditReqAssignee(e.target.value)} className="input-field w-full">
+                    <option value="">-- 不指定 --</option>
+                    {projectMembers.map(member => (
+                      <option key={member.id} value={member.id}>{member.name}</option>
+                    ))}
                   </select>
                 </div>
               </div>

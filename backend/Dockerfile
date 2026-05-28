@@ -8,12 +8,12 @@ WORKDIR /app
 # Copy package files and install dependencies.
 COPY package.json ./
 COPY bun.lock ./
-RUN bun install
+RUN bun install --frozen-lockfile
 
 # Copy application source.
 COPY . .
 
-# Generate Prisma client only at build time.
+# Generate Prisma client at build time.
 RUN bunx prisma generate
 
 ENV NODE_ENV=production

@@ -2,8 +2,6 @@
 # PM System — 本地開發環境
 # 使用方式：docker compose up -d
 # ============================================================
-version: '3.8'
-
 services:
   frontend:
     build:
@@ -39,7 +37,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    command: sh -c "bunx prisma db push --accept-data-loss && bunx prisma db seed && bun src/index.ts"
+    command: sh -c "bunx prisma db push && bunx prisma db seed && bun src/index.ts"
 
   db:
     image: postgres:15-alpine
