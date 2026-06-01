@@ -21,22 +21,15 @@ import { agentRoutes } from './routes/agents'
 import { tokenLogRoutes } from './routes/tokenlogs'
 import { agentWebSocketRoutes, agentManagementRoutes, agentHealthRoutes } from './agent/runtime'
 import { PrismaClient } from '@prisma/client'
-import { PrismaPg } from '@prisma/adapter-pg'
-import { Pool } from 'pg'
+import { prisma } from './utils/prisma'
 import { setRolePermissions } from './middleware/permission'
 
 // ─── In-memory role permissions cache ────────────────────────────────────────
 // Loaded from DB once per role. Managed by index.ts. Callers use setRolePermissions().
 const rolePermissionCache = new Map<string, string[]>()
-let prismaInstance: PrismaClient | null = null
 
 function getPrisma(): PrismaClient {
-  if (!prismaInstance) {
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL })
-    const adapter = new PrismaPg(pool)
-    prismaInstance = new PrismaClient({ adapter })
-  }
-  return prismaInstance
+  return prisma
 }
 
 async function loadRolePermissions(roleName: string): Promise<string[]> {

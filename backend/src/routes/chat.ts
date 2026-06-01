@@ -1550,13 +1550,16 @@ async function streamLLMResponse(options: {
         sendData(sseChunk({ id: streamId, model: config.model, finishReason: 'stop' }))
 
         if (assistantContent.trim()) {
-          await prisma.chatMessage.create({
-            data: { sessionId, role: 'assistant', content: assistantContent }
-          })
-          await prisma.chatSession.update({
-            where: { id: sessionId },
-            data: { updatedAt: new Date() }
-          })
+          // Use Promise.all for parallel writes to avoid connection contention
+          await Promise.all([
+            prisma.chatMessage.create({
+              data: { sessionId, role: 'assistant', content: assistantContent }
+            }),
+            prisma.chatSession.update({
+              where: { id: sessionId },
+              data: { updatedAt: new Date() }
+            })
+          ])
         }
 
         sendData('[DONE]')
