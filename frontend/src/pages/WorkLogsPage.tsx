@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Clock, Plus, Calendar, Edit2, Trash2, X, Check, Download, BarChart3, Users, Building2, FolderKanban } from 'lucide-react'
+import { Clock, Plus, Calendar, Edit2, Trash2, X, Check, Download, BarChart3, Users, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { workLogApi, projectApi, taskApi, bugApi, userApi, departmentApi } from '../utils/api'
 import type { WorkLog } from '../types'
@@ -32,7 +32,7 @@ export default function WorkLogsPage() {
   const [filterDepartment, setFilterDepartment] = useState('')
   const [filterStartDate, setFilterStartDate] = useState('')
   const [filterEndDate, setFilterEndDate] = useState('')
-  const [groupBy, setGroupBy] = useState<'user' | 'department' | 'project' | ''>('')
+  const [groupBy, setGroupBy] = useState<'user' | 'department' | 'project' | 'day' | 'week' | 'month' | ''>('')
   const [groupedData, setGroupedData] = useState<GroupedData[]>([])
   const [grandTotal, setGrandTotal] = useState(0)
   const [totalRecords, setTotalRecords] = useState(0)
@@ -52,6 +52,7 @@ export default function WorkLogsPage() {
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ hours: '', workDate: '', note: '' })
+  const [detailLog, setDetailLog] = useState<WorkLog | null>(null)
 
   useEffect(() => {
     loadProjects()
@@ -520,6 +521,9 @@ export default function WorkLogsPage() {
               <option value="user">按人員統計</option>
               <option value="department">按部門統計</option>
               <option value="project">按項目統計</option>
+              <option value="day">按日期統計</option>
+              <option value="week">按週統計</option>
+              <option value="month">按月統計</option>
             </select>
           </div>
         </div>
@@ -540,7 +544,7 @@ export default function WorkLogsPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      {groupBy === 'user' ? '人員' : groupBy === 'department' ? '部門' : '項目'}
+                      {groupBy === 'user' ? '人員' : groupBy === 'department' ? '部門' : groupBy === 'project' ? '項目' : groupBy === 'day' ? '日期' : groupBy === 'week' ? '週期' : '月份'}
                     </th>
                     {groupBy === 'user' && (
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">部門</th>
@@ -680,6 +684,13 @@ export default function WorkLogsPage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setDetailLog(log)}
+                            className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="查看詳情"
+                          >
+                            <Eye size={16} />
+                          </button>
                           {(user?.role === 'admin' || log.user?.id === user?.id) && hasAnyPermission(user, ['worklogs.edit']) ? (
                             <button
                               onClick={() => startEdit(log)}
@@ -721,6 +732,60 @@ export default function WorkLogsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {detailLog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xl font-bold text-gray-900">工作時數詳情</h2>
+              <button onClick={() => setDetailLog(null)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-gray-500 mb-1">日期</p>
+                <p className="text-gray-900 font-medium">{new Date(detailLog.workDate).toLocaleDateString('zh-TW')}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 mb-1">時數</p>
+                <p className="text-primary-600 font-semibold">{detailLog.hours}h</p>
+              </div>
+              <div>
+                <p className="text-gray-500 mb-1">項目</p>
+                <p className="text-gray-900 font-medium">{detailLog.task?.project?.name || detailLog.bug?.project?.name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 mb-1">人員</p>
+                <p className="text-gray-900 font-medium">{detailLog.user?.name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 mb-1">部門</p>
+                <p className="text-gray-900 font-medium">{(detailLog.user as any)?.department?.name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 mb-1">關聯對象</p>
+                <p className="text-gray-900 font-medium break-words">
+                  {detailLog.task?.title ? `任務：${detailLog.task.title}` : detailLog.bug?.title ? `缺陷：${detailLog.bug.title}` : '-'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <p className="text-gray-500 text-sm mb-2">備註</p>
+              <div className="min-h-[120px] whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800">
+                {detailLog.note || '-'}
+              </div>
+            </div>
+
+            <div className="flex justify-end mt-5">
+              <button type="button" onClick={() => setDetailLog(null)} className="btn-secondary">關閉</button>
+            </div>
           </div>
         </div>
       )}

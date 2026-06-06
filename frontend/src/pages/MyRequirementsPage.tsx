@@ -224,7 +224,7 @@ export default function MyRequirementsPage() {
                   </p>
                   <div className="flex items-center gap-4 text-sm">
                     <span className="text-gray-400 flex items-center gap-1">
-                      <CheckCircle size={14} />{req.taskCount || 0} 任務
+                      <CheckCircle size={14} />{req._count?.tasks ?? req.taskCount ?? 0} 任務
                     </span>
                   </div>
                 </div>

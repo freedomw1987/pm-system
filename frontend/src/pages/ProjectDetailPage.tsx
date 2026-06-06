@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle, Search } from 'lucide-react'
 import { projectApi, requirementApi, taskApi, bugApi, userApi, roleApi } from '../utils/api'
 import { hasAnyPermission } from '../utils/permissions'
 import type { Project, Requirement, User, ProjectMember, Role, Task, Bug } from '../types'
@@ -9,6 +9,7 @@ import RichTextEditor from '../components/RichTextEditor'
 import WikiTab from '../components/WikiTab'
 import AttachmentsTab from '../components/AttachmentsTab'
 import ProjectKanban from '../components/ProjectKanban'
+import ToggleMultiSelect from '../components/ToggleMultiSelect'
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -45,6 +46,8 @@ export default function ProjectDetailPage() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskDesc, setNewTaskDesc] = useState('')
   const [newTaskAssignee, setNewTaskAssignee] = useState('')
+  const [newTaskParticipantIds, setNewTaskParticipantIds] = useState<string[]>([])
+  const [newTaskParentId, setNewTaskParentId] = useState('')
   const [isAddingTask, setIsAddingTask] = useState(false)
 
   // Edit task
@@ -52,6 +55,8 @@ export default function ProjectDetailPage() {
   const [editTaskTitle, setEditTaskTitle] = useState('')
   const [editTaskDesc, setEditTaskDesc] = useState('')
   const [editTaskAssignee, setEditTaskAssignee] = useState('')
+  const [editTaskParticipantIds, setEditTaskParticipantIds] = useState<string[]>([])
+  const [editTaskParentId, setEditTaskParentId] = useState('')
   const [editTaskStatus, setEditTaskStatus] = useState('')
   const [isEditingTask, setIsEditingTask] = useState(false)
 
@@ -60,6 +65,7 @@ export default function ProjectDetailPage() {
   const [newBugTitle, setNewBugTitle] = useState('')
   const [newBugDesc, setNewBugDesc] = useState('')
   const [newBugSeverity, setNewBugSeverity] = useState('medium')
+  const [newBugAssignee, setNewBugAssignee] = useState('')
   const [isAddingBug, setIsAddingBug] = useState(false)
 
   // Edit bug
@@ -68,6 +74,7 @@ export default function ProjectDetailPage() {
   const [editBugDesc, setEditBugDesc] = useState('')
   const [editBugSeverity, setEditBugSeverity] = useState('')
   const [editBugStatus, setEditBugStatus] = useState('')
+  const [editBugAssignee, setEditBugAssignee] = useState('')
   const [isEditingBug, setIsEditingBug] = useState(false)
 
   // Edit requirement
@@ -82,19 +89,28 @@ export default function ProjectDetailPage() {
   useEffect(() => { roleApi.list().then(r => setAvailableRoles(r.data.roles || [])) }, [])
 
   const loadProject = async () => {
+    setIsLoading(true)
     try {
-      const [projectRes, reqRes, tasksRes, bugsRes] = await Promise.all([
-        projectApi.get(id!),
+      const projectRes = await projectApi.get(id!)
+      setProject(projectRes.data.project)
+
+      const [reqRes, tasksRes, bugsRes] = await Promise.allSettled([
         requirementApi.list(id!),
         taskApi.list({ projectId: id }),
         bugApi.list({ projectId: id })
       ])
-      setProject(projectRes.data.project)
-      setRequirements(reqRes.data.requirements)
-      setTasks(tasksRes.data.tasks || [])
-      setBugs(bugsRes.data.bugs || [])
+
+      if (reqRes.status === 'fulfilled') setRequirements(reqRes.value.data.requirements)
+      else console.error('Failed to load requirements:', reqRes.reason)
+
+      if (tasksRes.status === 'fulfilled') setTasks(tasksRes.value.data.tasks || [])
+      else console.error('Failed to load tasks:', tasksRes.reason)
+
+      if (bugsRes.status === 'fulfilled') setBugs(bugsRes.value.data.bugs || [])
+      else console.error('Failed to load bugs:', bugsRes.reason)
     } catch (err) {
       console.error(err)
+      setProject(null)
     } finally {
       setIsLoading(false)
     }
@@ -174,10 +190,17 @@ export default function ProjectDetailPage() {
     if (!newTaskTitle.trim()) return
     setIsAddingTask(true)
     try {
-      const payload = { title: newTaskTitle, description: newTaskDesc, projectId: id, assigneeId: newTaskAssignee || undefined }
+      const payload = {
+        title: newTaskTitle,
+        description: newTaskDesc,
+        projectId: id,
+        assigneeId: newTaskAssignee || undefined,
+        participantIds: newTaskParticipantIds,
+        parentTaskId: newTaskParentId || undefined
+      }
       await taskApi.create(payload)
       setShowAddTaskModal(false)
-      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee('')
+      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId('')
       loadProject()
     } catch (err) {
       console.error(err)
@@ -192,9 +215,9 @@ export default function ProjectDetailPage() {
     if (!newBugTitle.trim()) return
     setIsAddingBug(true)
     try {
-      await bugApi.create({ title: newBugTitle, description: newBugDesc, severity: newBugSeverity, projectId: id })
+      await bugApi.create({ title: newBugTitle, description: newBugDesc, severity: newBugSeverity, assigneeId: newBugAssignee || undefined, projectId: id })
       setShowAddBugModal(false)
-      setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium')
+      setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee('')
       loadProject()
     } catch (err) {
       console.error(err)
@@ -209,6 +232,8 @@ export default function ProjectDetailPage() {
     setEditTaskTitle(task.title)
     setEditTaskDesc(task.description || '')
     setEditTaskAssignee(task.assignee?.id || '')
+    setEditTaskParticipantIds(task.participants?.map(p => p.user.id).filter(Boolean) || [])
+    setEditTaskParentId(task.parentTaskId || task.parentTask?.id || '')
     setEditTaskStatus(task.status)
   }
 
@@ -220,6 +245,8 @@ export default function ProjectDetailPage() {
       const payload: any = { title: editTaskTitle, description: editTaskDesc, status: editTaskStatus }
       if (editTaskAssignee) payload.assigneeId = editTaskAssignee
       else payload.assigneeId = null // unassign
+      payload.participantIds = editTaskParticipantIds
+      payload.parentTaskId = editTaskParentId || null
       await taskApi.update(editingTask.id, payload)
       setEditingTask(null)
       loadProject()
@@ -249,6 +276,7 @@ export default function ProjectDetailPage() {
     setEditBugDesc(bug.description || '')
     setEditBugSeverity(bug.severity)
     setEditBugStatus(bug.status)
+    setEditBugAssignee(bug.assignee?.id || '')
   }
 
   const handleEditBug = async (e: React.FormEvent) => {
@@ -257,8 +285,11 @@ export default function ProjectDetailPage() {
     setIsEditingBug(true)
     try {
       await bugApi.update(editingBug.id, {
+        title: editBugTitle,
         description: editBugDesc,
-        status: editBugStatus
+        severity: editBugSeverity,
+        status: editBugStatus,
+        assigneeId: editBugAssignee || null
       })
       setEditingBug(null)
       loadProject()
@@ -483,7 +514,7 @@ export default function ProjectDetailPage() {
                       </div>
                       <p className="text-gray-500 text-sm mb-3">{req.description ? stripHtml(req.description) : '暫無描述'}</p>
                       <div className="flex items-center gap-4 text-sm">
-                        <span className="text-gray-400 flex items-center gap-1"><CheckCircle size={14} />{req.taskCount || 0} 任務</span>
+                        <span className="text-gray-400 flex items-center gap-1"><CheckCircle size={14} />{req._count?.tasks ?? req.taskCount ?? 0} 任務</span>
                       </div>
                     </div>
                   </div>
@@ -497,16 +528,11 @@ export default function ProjectDetailPage() {
       {/* Tasks Tab */}
       {activeTab === 'tasks' && (
         <div>
-          {hasAnyPermission(user, ['tasks.create']) && (
-            <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setShowAddTaskModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
-              <Plus size={20} /><span>新建任務</span>
-            </button>
-          )}
           {tasks.length === 0 ? (
             <div className="card p-12 text-center">
               <CheckCircle size={48} className="mx-auto text-gray-400 mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">暫無任務</h3>
-              <p className="text-gray-500">點擊上方按鈕創建任務</p>
+              <p className="text-gray-500">請進入需求詳情新增任務</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -523,6 +549,15 @@ export default function ProjectDetailPage() {
                       )}
                       {task.assignee && (
                         <p className="text-gray-400 text-xs mt-1">負責人：{task.assignee.name}</p>
+                      )}
+                      {task.participants && task.participants.length > 0 && (
+                        <p className="text-gray-400 text-xs mt-1">參與人：{task.participants.map(p => p.user.name).filter(Boolean).join(', ')}</p>
+                      )}
+                      {task.parentTask && (
+                        <p className="text-gray-400 text-xs mt-1">父任务：{task.parentTask.title}</p>
+                      )}
+                      {task.subtasks && task.subtasks.length > 0 && (
+                        <p className="text-gray-400 text-xs mt-1">子任务：{task.subtasks.map(st => st.title).join(', ')}</p>
                       )}
                       {task.requirements && task.requirements.length > 0 && (
                         <p className="text-gray-400 text-xs mt-1">需求：{task.requirements.map(r => r.requirement?.title).filter(Boolean).join(', ')}</p>
@@ -552,7 +587,7 @@ export default function ProjectDetailPage() {
       {activeTab === 'bugs' && (
         <div>
           {hasAnyPermission(user, ['bugs.create']) && (
-            <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
+            <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
               <Plus size={20} /><span>新建缺陷</span>
             </button>
           )}
@@ -579,6 +614,9 @@ export default function ProjectDetailPage() {
                       )}
                       {bug.reporter && (
                         <p className="text-gray-400 text-xs mt-1">回報人：{bug.reporter.name}</p>
+                      )}
+                      {bug.assignee && (
+                        <p className="text-gray-400 text-xs mt-1">负责人：{bug.assignee.name}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -655,24 +693,30 @@ export default function ProjectDetailPage() {
         newTaskTitle={newTaskTitle} setNewTaskTitle={setNewTaskTitle}
         newTaskDesc={newTaskDesc} setNewTaskDesc={setNewTaskDesc}
         newTaskAssignee={newTaskAssignee} setNewTaskAssignee={setNewTaskAssignee}
+        newTaskParticipantIds={newTaskParticipantIds} setNewTaskParticipantIds={setNewTaskParticipantIds}
+        newTaskParentId={newTaskParentId} setNewTaskParentId={setNewTaskParentId}
         isAddingTask={isAddingTask} handleAddTask={handleAddTask}
-        project={project}
+        project={project} tasks={tasks}
       />
       <AddBugModal
         showAddBugModal={showAddBugModal} setShowAddBugModal={setShowAddBugModal}
         newBugTitle={newBugTitle} setNewBugTitle={setNewBugTitle}
         newBugDesc={newBugDesc} setNewBugDesc={setNewBugDesc}
         newBugSeverity={newBugSeverity} setNewBugSeverity={setNewBugSeverity}
+        newBugAssignee={newBugAssignee} setNewBugAssignee={setNewBugAssignee}
         isAddingBug={isAddingBug} handleAddBug={handleAddBug}
+        project={project}
       />
       <EditTaskModal
         editingTask={editingTask} setEditingTask={setEditingTask}
         editTaskTitle={editTaskTitle} setEditTaskTitle={setEditTaskTitle}
         editTaskDesc={editTaskDesc} setEditTaskDesc={setEditTaskDesc}
         editTaskAssignee={editTaskAssignee} setEditTaskAssignee={setEditTaskAssignee}
+        editTaskParticipantIds={editTaskParticipantIds} setEditTaskParticipantIds={setEditTaskParticipantIds}
+        editTaskParentId={editTaskParentId} setEditTaskParentId={setEditTaskParentId}
         editTaskStatus={editTaskStatus} setEditTaskStatus={setEditTaskStatus}
         isEditingTask={isEditingTask} handleEditTask={handleEditTask}
-        project={project}
+        project={project} tasks={tasks}
       />
       <EditBugModal
         editingBug={editingBug} setEditingBug={setEditingBug}
@@ -680,7 +724,9 @@ export default function ProjectDetailPage() {
         editBugDesc={editBugDesc} setEditBugDesc={setEditBugDesc}
         editBugSeverity={editBugSeverity} setEditBugSeverity={setEditBugSeverity}
         editBugStatus={editBugStatus} setEditBugStatus={setEditBugStatus}
+        editBugAssignee={editBugAssignee} setEditBugAssignee={setEditBugAssignee}
         isEditingBug={isEditingBug} handleEditBug={handleEditBug}
+        project={project}
       />
       <AddMemberModal
         showAddMember={showAddMember} setShowAddMember={setShowAddMember}
@@ -709,7 +755,32 @@ export default function ProjectDetailPage() {
 
 // ── Add Member Modal ──────────────────────────────────────────────────────
 function AddMemberModal({ showAddMember, setShowAddMember, allUsers, selectedUserId, setSelectedUserId, selectedRole, setSelectedRole, availableRoles, isAddingMember, handleAddMember }: any) {
+  const [userSearch, setUserSearch] = useState('')
+  const [isUserListOpen, setIsUserListOpen] = useState(false)
+
+  useEffect(() => {
+    if (showAddMember) {
+      setUserSearch('')
+      setIsUserListOpen(false)
+    }
+  }, [showAddMember])
+
   if (!showAddMember) return null
+
+  const selectedUser = allUsers.find((u: User) => u.id === selectedUserId)
+  const normalizedSearch = userSearch.trim().toLowerCase()
+  const filteredUsers = normalizedSearch
+    ? allUsers.filter((u: User) =>
+        `${u.name} ${u.email}`.toLowerCase().includes(normalizedSearch)
+      )
+    : allUsers
+
+  const chooseUser = (userId: string) => {
+    setSelectedUserId(userId)
+    setUserSearch('')
+    setIsUserListOpen(false)
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -720,13 +791,54 @@ function AddMemberModal({ showAddMember, setShowAddMember, allUsers, selectedUse
         <form onSubmit={handleAddMember} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">選擇用戶 *</label>
-            <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)} className="input-field" required>
-              <option value="">-- 選擇用戶 --</option>
-              {allUsers.map((u: any) => (
-                <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
-              ))}
-            </select>
+            <input type="hidden" value={selectedUserId} required />
+            <div
+              className="relative"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  setIsUserListOpen(false)
+                }
+              }}
+            >
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => {
+                  setUserSearch(e.target.value)
+                  setIsUserListOpen(true)
+                }}
+                onFocus={() => setIsUserListOpen(true)}
+                className="input-field pl-9"
+                placeholder={selectedUser ? `${selectedUser.name} (${selectedUser.email})` : '搜尋姓名或 Email'}
+                autoComplete="off"
+              />
+              {isUserListOpen && (
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {filteredUsers.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500">找不到符合的用戶</div>
+                  ) : (
+                    filteredUsers.map((u: User) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => chooseUser(u.id)}
+                        className={`flex w-full flex-col px-3 py-2 text-left text-sm transition-colors ${
+                          selectedUserId === u.id
+                            ? 'bg-primary-50 text-primary-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="font-medium">{u.name}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             {allUsers.length === 0 && <p className="text-xs text-gray-500 mt-1">所有用戶已在此項目中</p>}
+            {selectedUser && <p className="text-xs text-gray-500 mt-1">已選擇：{selectedUser.name} ({selectedUser.email})</p>}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">項目角色 *</label>
@@ -739,7 +851,7 @@ function AddMemberModal({ showAddMember, setShowAddMember, allUsers, selectedUse
           </div>
           <div className="flex gap-3 justify-end">
             <button type="button" onClick={() => setShowAddMember(false)} className="btn-secondary">取消</button>
-            <button type="submit" disabled={isAddingMember} className="btn-primary">{isAddingMember ? '添加中...' : '添加'}</button>
+            <button type="submit" disabled={isAddingMember || !selectedUserId || !selectedRole} className="btn-primary">{isAddingMember ? '添加中...' : '添加'}</button>
           </div>
         </form>
       </div>
@@ -1088,8 +1200,9 @@ function AgentTasksList({ projectId }: { projectId: string }) {
 }
 
 // ── Add Task Modal ──────────────────────────────────────────────────────
-function AddTaskModal({ showAddTaskModal, setShowAddTaskModal, newTaskTitle, setNewTaskTitle, newTaskDesc, setNewTaskDesc, newTaskAssignee, setNewTaskAssignee, isAddingTask, handleAddTask, project }: any) {
+function AddTaskModal({ showAddTaskModal, setShowAddTaskModal, newTaskTitle, setNewTaskTitle, newTaskDesc, setNewTaskDesc, newTaskAssignee, setNewTaskAssignee, newTaskParticipantIds, setNewTaskParticipantIds, newTaskParentId, setNewTaskParentId, isAddingTask, handleAddTask, project, tasks }: any) {
   if (!showAddTaskModal) return null
+  const participantOptions = project?.members?.map((m: any) => ({ id: m.user.id, name: m.user.name })) || []
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -1117,6 +1230,23 @@ function AddTaskModal({ showAddTaskModal, setShowAddTaskModal, newTaskTitle, set
               ))}
             </select>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
+            <ToggleMultiSelect
+              options={participantOptions}
+              value={newTaskParticipantIds}
+              onChange={setNewTaskParticipantIds}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
+            <select value={newTaskParentId} onChange={(e) => setNewTaskParentId(e.target.value)} className="input-field">
+              <option value="">无父任务</option>
+              {tasks?.map((task: Task) => (
+                <option key={task.id} value={task.id}>{task.title}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex gap-3 justify-end">
             <button type="button" onClick={() => setShowAddTaskModal(false)} className="btn-secondary">取消</button>
             <button type="submit" disabled={isAddingTask} className="btn-primary">{isAddingTask ? '創建中...' : '創建'}</button>
@@ -1128,7 +1258,7 @@ function AddTaskModal({ showAddTaskModal, setShowAddTaskModal, newTaskTitle, set
 }
 
 // ── Add Bug Modal ──────────────────────────────────────────────────────
-function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewBugTitle, newBugDesc, setNewBugDesc, newBugSeverity, setNewBugSeverity, isAddingBug, handleAddBug }: any) {
+function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewBugTitle, newBugDesc, setNewBugDesc, newBugSeverity, setNewBugSeverity, newBugAssignee, setNewBugAssignee, isAddingBug, handleAddBug, project }: any) {
   if (!showAddBugModal) return null
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -1157,6 +1287,15 @@ function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewB
               <option value="critical">危急</option>
             </select>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">负责人</label>
+            <select value={newBugAssignee} onChange={(e) => setNewBugAssignee(e.target.value)} className="input-field">
+              <option value="">未指定</option>
+              {project?.members?.map((m: any) => (
+                <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex gap-3 justify-end">
             <button type="button" onClick={() => setShowAddBugModal(false)} className="btn-secondary">取消</button>
             <button type="submit" disabled={isAddingBug} className="btn-primary">{isAddingBug ? '創建中...' : '創建'}</button>
@@ -1168,8 +1307,9 @@ function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewB
 }
 
 // ── Edit Task Modal ──────────────────────────────────────────────────────
-function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTaskTitle, editTaskDesc, setEditTaskDesc, editTaskAssignee, setEditTaskAssignee, editTaskStatus, setEditTaskStatus, isEditingTask, handleEditTask, project }: any) {
+function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTaskTitle, editTaskDesc, setEditTaskDesc, editTaskAssignee, setEditTaskAssignee, editTaskParticipantIds, setEditTaskParticipantIds, editTaskParentId, setEditTaskParentId, editTaskStatus, setEditTaskStatus, isEditingTask, handleEditTask, project, tasks }: any) {
   if (!editingTask) return null
+  const participantOptions = project?.members?.map((m: any) => ({ id: m.user.id, name: m.user.name })) || []
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -1198,6 +1338,23 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
+            <ToggleMultiSelect
+              options={participantOptions}
+              value={editTaskParticipantIds}
+              onChange={setEditTaskParticipantIds}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
+            <select value={editTaskParentId} onChange={(e) => setEditTaskParentId(e.target.value)} className="input-field">
+              <option value="">无父任务</option>
+              {tasks?.filter((task: Task) => task.id !== editingTask.id).map((task: Task) => (
+                <option key={task.id} value={task.id}>{task.title}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
             <select value={editTaskStatus} onChange={(e) => setEditTaskStatus(e.target.value)} className="input-field">
               <option value="pending">待處理</option>
@@ -1216,7 +1373,7 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
 }
 
 // ── Edit Bug Modal ──────────────────────────────────────────────────────
-function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle, editBugDesc, setEditBugDesc, editBugSeverity, setEditBugSeverity, editBugStatus, setEditBugStatus, isEditingBug, handleEditBug }: any) {
+function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle, editBugDesc, setEditBugDesc, editBugSeverity, setEditBugSeverity, editBugStatus, setEditBugStatus, editBugAssignee, setEditBugAssignee, isEditingBug, handleEditBug, project }: any) {
   if (!editingBug) return null
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -1253,6 +1410,15 @@ function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle
               <option value="resolved">已修復</option>
               <option value="verified">已驗證</option>
               <option value="closed">已關閉</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">负责人</label>
+            <select value={editBugAssignee} onChange={(e) => setEditBugAssignee(e.target.value)} className="input-field">
+              <option value="">未指定</option>
+              {project?.members?.map((m: any) => (
+                <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+              ))}
             </select>
           </div>
           <div className="flex gap-3 justify-end">

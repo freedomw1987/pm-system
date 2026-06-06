@@ -1,6 +1,30 @@
 import axios from 'axios'
+import { createRefreshTokenManager } from './authRefresh'
 
 const API_URL = import.meta.env.VITE_API_URL || '/api'
+const AUTH_URL = import.meta.env.VITE_AUTH_URL || '/auth'
+
+const clearAuthStorage = () => {
+  localStorage.removeItem('accessToken')
+  localStorage.removeItem('refreshToken')
+  localStorage.removeItem('user')
+}
+
+const refreshTokenManager = createRefreshTokenManager({
+  getRefreshToken: () => localStorage.getItem('refreshToken'),
+  refresh: async (refreshToken) => {
+    const response = await axios.post(`${AUTH_URL}/refresh`, { refreshToken })
+    return response.data
+  },
+  setTokens: (response) => {
+    localStorage.setItem('accessToken', response.accessToken)
+    localStorage.setItem('refreshToken', response.refreshToken)
+    if (response.user) {
+      localStorage.setItem('user', JSON.stringify(response.user))
+    }
+  },
+  clearTokens: clearAuthStorage,
+})
 
 const api = axios.create({
   baseURL: API_URL,
@@ -22,24 +46,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Try to refresh token
-      const refreshToken = localStorage.getItem('refreshToken')
-      if (refreshToken) {
-        try {
-          const response = await axios.post(`${API_URL}/auth/refresh`, { refreshToken })
-          localStorage.setItem('accessToken', response.data.accessToken)
-          localStorage.setItem('refreshToken', response.data.refreshToken)
-          // Retry original request
-          error.config.headers.Authorization = `Bearer ${response.data.accessToken}`
-          return api(error.config)
-        } catch {
-          // Refresh failed, logout
-          localStorage.removeItem('accessToken')
-          localStorage.removeItem('refreshToken')
-          window.location.href = '/login'
-        }
-      } else {
+    if (error.response?.status === 401 && !error.config?._retry) {
+      error.config._retry = true
+
+      try {
+        const accessToken = await refreshTokenManager.refreshAccessToken()
+        error.config.headers = error.config.headers || {}
+        error.config.headers.Authorization = `Bearer ${accessToken}`
+        return api(error.config)
+      } catch {
         window.location.href = '/login'
       }
     }
@@ -52,10 +67,10 @@ export default api
 // Auth API (public, outside /api prefix) - use axios directly
 export const authApi = {
   login: (email: string, password: string) =>
-    axios.post('/auth/login', { email, password }),
-  logout: () => axios.post('/auth/logout'),
+    axios.post(`${AUTH_URL}/login`, { email, password }),
+  logout: () => axios.post(`${AUTH_URL}/logout`),
   refresh: (refreshToken: string) =>
-    axios.post('/auth/refresh', { refreshToken }),
+    axios.post(`${AUTH_URL}/refresh`, { refreshToken }),
 }
 
 // User API
@@ -125,10 +140,10 @@ export const requirementApi = {
 export const taskApi = {
   list: (params?: { projectId?: string; status?: string; assigneeId?: string; requirementId?: string }) =>
     api.get('/tasks', { params }),
-  create: (data: { title: string; description?: string; assigneeId?: string; requirementIds?: string[]; estimatedHours?: number; projectId?: string }) =>
+  create: (data: { title: string; description?: string; assigneeId?: string; assigneeIds?: string[]; participantIds?: string[]; parentTaskId?: string | null; requirementIds?: string[]; estimatedHours?: number; projectId?: string }) =>
     api.post('/tasks', data),
   get: (id: string) => api.get(`/tasks/${id}`),
-  update: (id: string, data: { title?: string; description?: string; status?: string; assigneeId?: string; estimatedHours?: number }) =>
+  update: (id: string, data: { title?: string; description?: string; status?: string; assigneeId?: string | null; assigneeIds?: string[]; participantIds?: string[]; parentTaskId?: string | null; estimatedHours?: number }) =>
     api.put(`/tasks/${id}`, data),
   updateStatus: (id: string, status: string) =>
     api.put(`/tasks/${id}`, { status }),
@@ -144,11 +159,11 @@ export const taskApi = {
 
 // Bug API
 export const bugApi = {
-  list: (params?: { taskId?: string; status?: string; reporterId?: string; requirementId?: string; projectId?: string }) =>
+  list: (params?: { taskId?: string; status?: string; reporterId?: string; assigneeId?: string; requirementId?: string; projectId?: string }) =>
     api.get('/bugs', { params }),
-  create: (data: { title: string; description?: string; taskId?: string; severity?: string; requirementId?: string; projectId?: string }) =>
+  create: (data: { title: string; description?: string; taskId?: string; severity?: string; assigneeId?: string; requirementId?: string; projectId?: string }) =>
     api.post('/bugs', data),
-  update: (id: string, data: { status?: string; description?: string }) =>
+  update: (id: string, data: { title?: string; status?: string; description?: string; severity?: string; assigneeId?: string | null }) =>
     api.put(`/bugs/${id}`, data),
   updateStatus: (id: string, status: string) =>
     api.put(`/bugs/${id}`, { status }),
@@ -157,7 +172,7 @@ export const bugApi = {
 
 // WorkLog API
 export const workLogApi = {
-  list: (params?: { userId?: string; taskId?: string; bugId?: string; projectId?: string; startDate?: string; endDate?: string }) =>
+  list: (params?: { userId?: string; taskId?: string; bugId?: string; projectId?: string; startDate?: string; endDate?: string; groupBy?: string }) =>
     api.get('/worklogs', { params }),
   create: (data: { taskId?: string; bugId?: string; hours: number; workDate: string; note?: string }) =>
     api.post('/worklogs', data),

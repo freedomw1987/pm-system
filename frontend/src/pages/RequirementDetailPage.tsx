@@ -5,6 +5,7 @@ import { requirementApi, taskApi, bugApi, projectApi, workLogApi } from '../util
 import { hasAnyPermission } from '../utils/permissions'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
+import ToggleMultiSelect from '../components/ToggleMultiSelect'
 import type { Requirement, Task, Bug, User } from '../types'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -33,6 +34,8 @@ export default function RequirementDetailPage() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskDesc, setNewTaskDesc] = useState('')
   const [newTaskAssignee, setNewTaskAssignee] = useState('')
+  const [newTaskParticipantIds, setNewTaskParticipantIds] = useState<string[]>([])
+  const [newTaskParentId, setNewTaskParentId] = useState('')
   const [isAddingTask, setIsAddingTask] = useState(false)
   const [autoAssignAgent, setAutoAssignAgent] = useState(true)
   const [recommendedAgent, setRecommendedAgent] = useState<{ id: string; name: string; skills: string[] } | null>(null)
@@ -44,6 +47,8 @@ export default function RequirementDetailPage() {
   const [editTaskDesc, setEditTaskDesc] = useState('')
   const [editTaskStatus, setEditTaskStatus] = useState('')
   const [editTaskAssignee, setEditTaskAssignee] = useState('')
+  const [editTaskParticipantIds, setEditTaskParticipantIds] = useState<string[]>([])
+  const [editTaskParentId, setEditTaskParentId] = useState('')
   const [isEditingTask, setIsEditingTask] = useState(false)
 
   // ── Bug CRUD ───────────────────────────────────────────────────
@@ -167,6 +172,8 @@ export default function RequirementDetailPage() {
         title: newTaskTitle,
         description: newTaskDesc,
         assigneeId: newTaskAssignee || undefined,
+        participantIds: newTaskParticipantIds,
+        parentTaskId: newTaskParentId || undefined,
         requirementIds: [id!],
         projectId: requirement?.projectId
       })
@@ -184,7 +191,7 @@ export default function RequirementDetailPage() {
       }
 
       setShowAddTask(false)
-      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee('')
+      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId('')
       setRecommendedAgent(null)
       loadData()
     } catch (err) {
@@ -264,6 +271,8 @@ export default function RequirementDetailPage() {
     setEditTaskDesc(task.description || '')
     setEditTaskStatus(task.status)
     setEditTaskAssignee(task.assignee?.id || '')
+    setEditTaskParticipantIds(task.participants?.map(p => p.user.id).filter(Boolean) || [])
+    setEditTaskParentId(task.parentTaskId || task.parentTask?.id || '')
   }
 
   const handleEditTask = async (e: React.FormEvent) => {
@@ -275,7 +284,9 @@ export default function RequirementDetailPage() {
         title: editTaskTitle,
         description: editTaskDesc,
         status: editTaskStatus,
-        assigneeId: editTaskAssignee || undefined
+        assigneeId: editTaskAssignee || null,
+        participantIds: editTaskParticipantIds,
+        parentTaskId: editTaskParentId || null
       })
       setEditingTask(null)
       loadData()
@@ -518,6 +529,7 @@ export default function RequirementDetailPage() {
   const assigneeOptions = projectMembers.map(member => (
     <option key={member.id} value={member.id}>{member.name}</option>
   ))
+  const participantOptions = projectMembers.map(member => ({ id: member.id, name: member.name }))
 
   if (isLoading) {
     return (
@@ -591,7 +603,7 @@ export default function RequirementDetailPage() {
       {activeTab === 'tasks' && (
         <div>
           {hasAnyPermission(user, ['tasks.create']) && (
-            <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setShowAddTask(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
+            <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId(''); setShowAddTask(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
               <Plus size={20} /><span>新建任務</span>
             </button>
           )}
@@ -617,6 +629,15 @@ export default function RequirementDetailPage() {
                       )}
                       {task.assignee && (
                         <p className="text-gray-400 text-xs mt-1">負責人：{task.assignee.name}</p>
+                      )}
+                      {task.participants && task.participants.length > 0 && (
+                        <p className="text-gray-400 text-xs mt-1">參與人：{task.participants.map(p => p.user.name).filter(Boolean).join(', ')}</p>
+                      )}
+                      {task.parentTask && (
+                        <p className="text-gray-400 text-xs mt-1">父任务：{task.parentTask.title}</p>
+                      )}
+                      {task.subtasks && task.subtasks.length > 0 && (
+                        <p className="text-gray-400 text-xs mt-1">子任务：{task.subtasks.map(st => st.title).join(', ')}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
@@ -873,6 +894,24 @@ export default function RequirementDetailPage() {
                   {assigneeOptions}
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
+                <ToggleMultiSelect
+                  options={participantOptions}
+                  value={newTaskParticipantIds}
+                  onChange={setNewTaskParticipantIds}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
+                <select value={newTaskParentId} onChange={(e) => setNewTaskParentId(e.target.value)} className="input-field w-full">
+                  <option value="">无父任务</option>
+                  {tasks.map(task => (
+                    <option key={task.id} value={task.id}>{task.title}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex gap-3 justify-end pt-2">
                 <button type="button" onClick={() => setShowAddTask(false)} className="btn-secondary">取消</button>
                 <button type="submit" disabled={isAddingTask} className="btn-primary">
@@ -916,6 +955,26 @@ export default function RequirementDetailPage() {
                   <select value={editTaskAssignee} onChange={(e) => setEditTaskAssignee(e.target.value)} className="input-field w-full">
                     <option value="">-- 不指定 --</option>
                     {assigneeOptions}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
+                  <ToggleMultiSelect
+                    options={participantOptions}
+                    value={editTaskParticipantIds}
+                    onChange={setEditTaskParticipantIds}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
+                  <select value={editTaskParentId} onChange={(e) => setEditTaskParentId(e.target.value)} className="input-field w-full">
+                    <option value="">无父任务</option>
+                    {tasks.filter(task => task.id !== editingTask.id).map(task => (
+                      <option key={task.id} value={task.id}>{task.title}</option>
+                    ))}
                   </select>
                 </div>
               </div>

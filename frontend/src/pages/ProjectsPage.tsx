@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, Folder, Edit2, Trash2 } from 'lucide-react'
 import { projectApi, departmentApi } from '../utils/api'
@@ -36,20 +36,30 @@ export default function ProjectsPage() {
   const [isEditing, setIsEditing] = useState(false)
 
   const navigate = useNavigate()
+  const projectsRequestIdRef = useRef(0)
 
   useEffect(() => {
-    loadProjects()
     loadDepartments()
+  }, [])
+
+  useEffect(() => {
+    loadProjects(filterDepartmentId)
   }, [filterDepartmentId])
 
-  const loadProjects = async () => {
+  const loadProjects = async (selectedDepartmentId = filterDepartmentId) => {
+    const requestId = projectsRequestIdRef.current + 1
+    projectsRequestIdRef.current = requestId
+    setIsLoading(true)
     try {
-      const params = filterDepartmentId ? { departmentId: filterDepartmentId } : {}
+      const params = selectedDepartmentId ? { departmentId: selectedDepartmentId } : {}
       const response = await projectApi.list(params)
+      if (projectsRequestIdRef.current !== requestId) return
       setProjects(response.data.projects)
     } catch (err) {
+      if (projectsRequestIdRef.current !== requestId) return
       console.error('Failed to load projects:', err)
     } finally {
+      if (projectsRequestIdRef.current !== requestId) return
       setIsLoading(false)
     }
   }
@@ -164,10 +174,7 @@ export default function ProjectsPage() {
         {user?.role === 'admin' && (
           <select
             value={filterDepartmentId}
-            onChange={(e) => {
-              setFilterDepartmentId(e.target.value)
-              loadProjects()
-            }}
+            onChange={(e) => setFilterDepartmentId(e.target.value)}
             className="input-field w-48"
           >
             <option value="">全部部門</option>

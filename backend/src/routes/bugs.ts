@@ -10,6 +10,7 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
     if (query.taskId) where.taskId = query.taskId
     if (query.status) where.status = query.status
     if (query.reporterId) where.reporterId = query.reporterId
+    if (query.assigneeId) where.assigneeId = query.assigneeId
     if (query.projectId) where.projectId = query.projectId
     if (query.severity) where.severity = query.severity
     const and: any[] = []
@@ -41,6 +42,7 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
       where,
       include: {
         reporter: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true, email: true } },
         task: { select: { id: true, title: true } },
         project: { select: { id: true, name: true } }
       },
@@ -51,11 +53,12 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
   })
   // Create bug (Tester or Admin with bugs.create)
   .post('/', async ({ body, set, user }) => {
-    const { title, description, taskId, severity, requirementId, projectId } = body as {
+    const { title, description, taskId, severity, assigneeId, requirementId, projectId } = body as {
       title: string
       description?: string
       taskId?: string
       severity?: string
+      assigneeId?: string
       requirementId?: string
       projectId?: string
     }
@@ -72,12 +75,14 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
         description,
         taskId,
         reporterId: user.id,
+        assigneeId,
         severity: severity || 'medium',
         requirementId,
         projectId
       },
       include: {
         reporter: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true, email: true } },
         task: { select: { id: true, title: true } }
       }
     })
@@ -89,13 +94,20 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
       description: t.Optional(t.String()),
       taskId: t.Optional(t.String()),
       severity: t.Optional(t.String()),
+      assigneeId: t.Optional(t.String()),
       requirementId: t.Optional(t.String()),
       projectId: t.Optional(t.String())
     })
   })
   // Update bug
   .put('/:id', async ({ params, body, set, user }) => {
-    const { status, description } = body as { status?: string; description?: string }
+    const { title, status, description, severity, assigneeId } = body as {
+      title?: string
+      status?: string
+      description?: string
+      severity?: string
+      assigneeId?: string | null
+    }
 
     const existing = await prisma.bug.findUnique({ where: { id: params.id } })
     if (!existing) {
@@ -115,9 +127,10 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
 
     const bug = await prisma.bug.update({
       where: { id: params.id },
-      data: { status, description },
+      data: { title, status, description, severity, assigneeId },
       include: {
         reporter: { select: { id: true, name: true } },
+        assignee: { select: { id: true, name: true, email: true } },
         task: { select: { id: true, title: true } }
       }
     })

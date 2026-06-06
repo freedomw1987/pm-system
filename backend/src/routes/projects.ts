@@ -2,18 +2,41 @@ import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
 
+const getUserDepartmentId = async (user: any) => {
+  if (!user?.id) return null
+  if (user.departmentId) return user.departmentId
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { departmentId: true }
+  })
+  return dbUser?.departmentId || null
+}
+
+const canAccessProject = async (project: { departmentId?: string | null; members?: { userId: string }[] }, user: any) => {
+  if (!user) return false
+  if (user.role === 'admin') return true
+  if (project.members?.some(m => m.userId === user.id)) return true
+  const departmentId = await getUserDepartmentId(user)
+  return Boolean(departmentId && project.departmentId === departmentId)
+}
+
 const projectRoutes = new Elysia({ prefix: '/projects' })
   // Get all projects (filtered by permission)
   .get('/', async ({ query, user }) => {
     const { departmentId } = query as { departmentId?: string }
+
+    if (!user) return { projects: [] }
 
     // Build where clause
     const where: any = {}
 
     // Admin sees all projects (optionally filtered by department)
     if (user?.role !== 'admin') {
-      // Non-admin: only projects they are a member of
-      where.members = { some: { userId: user?.id } }
+      const userDepartmentId = await getUserDepartmentId(user)
+      where.OR = [
+        { members: { some: { userId: user?.id } } },
+        ...(userDepartmentId ? [{ departmentId: userDepartmentId }] : [])
+      ]
     }
 
     // Filter by department
@@ -111,8 +134,8 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       return { error: { code: 'NOT_FOUND', message: 'Project not found' } }
     }
 
-    // Check permission: admin or project member
-    if (!user || (user.role !== 'admin' && !project.members.some(m => m.userId === user.id))) {
+    // Check permission: admin, project member, or same department
+    if (!(await canAccessProject(project, user))) {
       set.status = 403
       return { error: { code: 'FORBIDDEN', message: 'Access denied' } }
     }
@@ -130,8 +153,8 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       return { requirements: [] }
     }
 
-    // Check permission: admin or project member
-    if (!user || (user.role !== 'admin' && !project.members.some(m => m.userId === user.id))) {
+    // Check permission: admin, project member, or same department
+    if (!(await canAccessProject(project, user))) {
       return { requirements: [] }
     }
 

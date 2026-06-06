@@ -135,6 +135,9 @@ export interface Requirement {
   assignee?: Pick<User, 'id' | 'name'>
   createdAt: string
   taskCount?: number
+  _count?: {
+    tasks?: number
+  }
   tasks?: Task[]
   project?: { id: string; name: string }
 }
@@ -146,6 +149,11 @@ export interface Task {
   description?: string
   assignee?: User & { isAgent?: boolean }
   assigneeId?: string
+  parentTaskId?: string | null
+  parentTask?: Pick<Task, 'id' | 'title' | 'status'> | null
+  subtasks?: Pick<Task, 'id' | 'title' | 'status' | 'assignee'>[]
+  participants?: { user: User }[]
+  participantIds?: string[]
   status: 'pending' | 'in_progress' | 'testing' | 'completed'
   estimatedHours?: number
   claimedByAgentAt?: string
@@ -160,13 +168,17 @@ export interface Bug {
   id: string
   taskId?: string
   requirementId?: string
+  projectId?: string
   title: string
   description?: string
   reporter?: User
+  assignee?: User
+  assigneeId?: string
   status: 'open' | 'in_progress' | 'resolved' | 'verified' | 'closed'
   severity: 'low' | 'medium' | 'high' | 'critical'
   createdAt: string
   task?: { id: string; title: string; project?: { id: string; name: string } }
+  project?: { id: string; name: string }
 }
 
 // WorkLog types

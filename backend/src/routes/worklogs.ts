@@ -2,6 +2,23 @@ import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
 
+const serializeWorkLog = (workLog: any) => ({
+  ...workLog,
+  workDate: workLog.date,
+  note: workLog.description
+})
+
+const formatDateKey = (date: Date) => date.toISOString().slice(0, 10)
+
+const getWeekKey = (date: Date) => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const day = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
 const workLogRoutes = new Elysia({ prefix: '/worklogs' })
   // Get work logs with filtering and grouping
   .get('/', async ({ query, user }) => {
@@ -17,16 +34,6 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
     if (!canViewAll) {
       // Non-admin users see only their own logs
       where.userId = user?.id
-    }
-
-    // Filter by project access (non-admin users see only project they're members of)
-    if (!canViewAll) {
-      const accessibleProjectIds = await prisma.projectMember.findMany({
-        where: { userId: user?.id },
-        select: { projectId: true }
-      }).then(r => r.map(m => m.projectId))
-
-      where.task = { projectId: { in: accessibleProjectIds } }
     }
 
     // Filter by project
@@ -89,7 +96,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
 
       // Group the results
       let groupedData: any[] = []
-      let groupKey: string
+      let groupKey = groupBy
 
       if (groupBy === 'user') {
         const grouped = new Map<string, { user: any; totalHours: number; count: number }>()
@@ -159,6 +166,69 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
           count: g.count
         }))
         groupKey = '項目'
+      } else if (groupBy === 'day' || groupBy === 'time') {
+        const grouped = new Map<string, { name: string; totalHours: number; count: number }>()
+        for (const log of workLogs) {
+          const key = formatDateKey(log.date)
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              name: key,
+              totalHours: 0,
+              count: 0
+            })
+          }
+          const entry = grouped.get(key)!
+          entry.totalHours += Number(log.hours)
+          entry.count += 1
+        }
+        groupedData = Array.from(grouped.values()).map(g => ({
+          name: g.name,
+          totalHours: Math.round(g.totalHours * 100) / 100,
+          count: g.count
+        }))
+        groupKey = '日期'
+      } else if (groupBy === 'week') {
+        const grouped = new Map<string, { name: string; totalHours: number; count: number }>()
+        for (const log of workLogs) {
+          const key = getWeekKey(log.date)
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              name: key,
+              totalHours: 0,
+              count: 0
+            })
+          }
+          const entry = grouped.get(key)!
+          entry.totalHours += Number(log.hours)
+          entry.count += 1
+        }
+        groupedData = Array.from(grouped.values()).map(g => ({
+          name: g.name,
+          totalHours: Math.round(g.totalHours * 100) / 100,
+          count: g.count
+        }))
+        groupKey = '週期'
+      } else if (groupBy === 'month') {
+        const grouped = new Map<string, { name: string; totalHours: number; count: number }>()
+        for (const log of workLogs) {
+          const key = log.date.toISOString().slice(0, 7)
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              name: key,
+              totalHours: 0,
+              count: 0
+            })
+          }
+          const entry = grouped.get(key)!
+          entry.totalHours += Number(log.hours)
+          entry.count += 1
+        }
+        groupedData = Array.from(grouped.values()).map(g => ({
+          name: g.name,
+          totalHours: Math.round(g.totalHours * 100) / 100,
+          count: g.count
+        }))
+        groupKey = '月份'
       }
 
       // Calculate grand total
@@ -185,7 +255,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
       orderBy: { date: 'desc' }
     })
 
-    return { workLogs: workLogs.map(w => ({ ...w, workDate: w.date })) }
+    return { workLogs: workLogs.map(serializeWorkLog) }
   })
   // Create work log
   .post('/', async ({ body, set, user }) => {
@@ -234,7 +304,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
       }
     })
 
-    return { workLog: { ...workLog, workDate: workLog.date } }
+    return { workLog: serializeWorkLog(workLog) }
   }, {
     body: t.Object({
       taskId: t.Optional(t.String()),
@@ -304,7 +374,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
       }
     })
 
-    return { workLog: { ...workLog, workDate: workLog.date } }
+    return { workLog: serializeWorkLog(workLog) }
   })
   // Delete work log
   .delete('/:id', async ({ params, set, user }) => {
@@ -347,7 +417,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
     }
 
     await prisma.workLog.delete({ where: { id: params.id } })
-    return { success: true, workLog: { ...existing, workDate: existing.date } }
+    return { success: true, workLog: serializeWorkLog(existing) }
   })
 
 export { workLogRoutes }

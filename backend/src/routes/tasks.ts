@@ -5,37 +5,91 @@ import { findBestAgent, getAgentsSkillOverview } from '../agent/skill-matcher'
 import { broadcastToAgents, getConnectedAgents } from '../agent/runtime'
 import { executeTask } from '../agent/task-executor'
 
+const userSelect = { id: true, name: true, email: true, isAgent: true }
+
+const taskInclude = {
+  assignee: { select: userSelect },
+  participants: {
+    include: { user: { select: userSelect } }
+  },
+  parentTask: { select: { id: true, title: true, status: true } },
+  subtasks: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      assignee: { select: { id: true, name: true } }
+    }
+  },
+  requirements: {
+    include: { requirement: { select: { id: true, title: true } } }
+  },
+  workLogs: {
+    select: { id: true, hours: true, date: true }
+  }
+}
+
+const normalizeParticipantIds = (assigneeId?: string | null, participantIds?: string[], assigneeIds?: string[]) => {
+  const ids = new Set<string>()
+  if (assigneeId) ids.add(assigneeId)
+  for (const id of participantIds || []) {
+    if (id) ids.add(id)
+  }
+  for (const id of assigneeIds || []) {
+    if (id) ids.add(id)
+  }
+  return Array.from(ids)
+}
+
+const userTaskMembershipWhere = (userId: string) => [
+  { assigneeId: userId },
+  { participants: { some: { userId } } }
+]
+
+export const resolveTaskProjectId = (
+  projectId: string | undefined,
+  requirements: Array<{ id: string; projectId: string }>
+) => {
+  const requirementProjectIds = Array.from(new Set(requirements.map(requirement => requirement.projectId)))
+
+  if (requirementProjectIds.length > 1) {
+    return { error: 'All linked requirements must belong to the same project' }
+  }
+
+  const requirementProjectId = requirementProjectIds[0]
+  if (requirementProjectId && projectId && projectId !== requirementProjectId) {
+    return { error: 'All linked requirements must belong to the task project' }
+  }
+
+  return { projectId: projectId || requirementProjectId }
+}
+
+export const buildTaskListWhere = (query: any, user: any) => {
+  const where: any = {}
+
+  if (query.projectId) where.projectId = query.projectId
+  if (query.status) where.status = query.status
+  if (query.requirementId) where.requirements = { some: { requirementId: query.requirementId } }
+
+  const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'tasks.view_all'))
+
+  if (!canViewAll && (user?.role === 'developer' || user?.role === 'tester')) {
+    where.OR = userTaskMembershipWhere(user.id)
+  } else if (query.assigneeId) {
+    where.OR = userTaskMembershipWhere(query.assigneeId)
+  }
+
+  return where
+}
+
 const taskRoutes = new Elysia({ prefix: '/tasks' })
   // Get tasks (filtered by assignee for developers)
   .get('/', async ({ query, user }) => {
-    const where: any = {}
-
-    if (query.projectId) where.projectId = query.projectId
-    if (query.status) where.status = query.status
-    if (query.requirementId) where.requirements = { some: { requirementId: query.requirementId } }
-
-    // Check if user can view all tasks
-    const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'tasks.view_all'))
-
-    // Developers and testers can only see their own tasks
-    // Others (with view_all or admin) can see all tasks
-    if (!canViewAll && (user?.role === 'developer' || user?.role === 'tester')) {
-      where.assigneeId = user.id
-    } else if (query.assigneeId) {
-      where.assigneeId = query.assigneeId
-    }
+    const where = buildTaskListWhere(query, user)
 
     const tasks = await prisma.task.findMany({
       where,
-      include: {
-        assignee: { select: { id: true, name: true } },
-        requirements: {
-          include: { requirement: { select: { id: true, title: true } } }
-        },
-        workLogs: {
-          select: { id: true, hours: true, date: true }
-        }
-      },
+      include: taskInclude,
       orderBy: { createdAt: 'desc' }
     })
 
@@ -43,10 +97,13 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
   })
   // Create task (Tech Lead or Admin with tasks.create)
   .post('/', async ({ body, set, user }) => {
-    const { title, description, assigneeId, requirementIds, estimatedHours, projectId } = body as {
+    const { title, description, assigneeId, assigneeIds, participantIds, parentTaskId, requirementIds, estimatedHours, projectId } = body as {
       title: string
       description?: string
-      assigneeId?: string
+      assigneeId?: string | null
+      assigneeIds?: string[]
+      participantIds?: string[]
+      parentTaskId?: string | null
       requirementIds?: string[]
       estimatedHours?: number
       projectId?: string
@@ -58,22 +115,61 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       return { error: { code: 'FORBIDDEN', message: "Permission denied: 'tasks.create' is required" } }
     }
 
+    const uniqueRequirementIds = Array.from(new Set((requirementIds || []).filter(Boolean)))
+    const linkedRequirements = uniqueRequirementIds.length
+      ? await prisma.requirement.findMany({
+          where: { id: { in: uniqueRequirementIds } },
+          select: { id: true, projectId: true }
+        })
+      : []
+
+    if (linkedRequirements.length !== uniqueRequirementIds.length) {
+      set.status = 400
+      return { error: { code: 'VALIDATION_ERROR', message: 'Linked requirement not found' } }
+    }
+
+    const projectResolution = resolveTaskProjectId(projectId, linkedRequirements)
+    if (projectResolution.error) {
+      set.status = 400
+      return { error: { code: 'VALIDATION_ERROR', message: projectResolution.error } }
+    }
+
+    const taskProjectId = projectResolution.projectId
+    if (!taskProjectId) {
+      set.status = 400
+      return { error: { code: 'VALIDATION_ERROR', message: 'projectId is required' } }
+    }
+
+    if (parentTaskId) {
+      const parentTask = await prisma.task.findUnique({
+        where: { id: parentTaskId },
+        select: { projectId: true }
+      })
+      if (!parentTask || parentTask.projectId !== taskProjectId) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: 'Parent task must belong to the same project' } }
+      }
+    }
+
+    const normalizedParticipantIds = normalizeParticipantIds(assigneeId, participantIds, assigneeIds)
+
     const task = await prisma.task.create({
       data: {
         title,
         description,
-        assigneeId,
+        assigneeId: assigneeId || undefined,
+        parentTaskId: parentTaskId || undefined,
         estimatedHours,
-        projectId,
-        requirements: requirementIds ? {
-          create: requirementIds.map(rid => ({ requirementId: rid }))
+        projectId: taskProjectId,
+        participants: normalizedParticipantIds.length ? {
+          create: normalizedParticipantIds.map(userId => ({ userId }))
+        } : undefined,
+        requirements: uniqueRequirementIds.length ? {
+          create: uniqueRequirementIds.map(rid => ({ requirementId: rid }))
         } : undefined
       },
       include: {
-        assignee: { select: { id: true, name: true } },
-        requirements: {
-          include: { requirement: { select: { id: true, title: true } } }
-        },
+        ...taskInclude,
         project: { select: { id: true, name: true } }
       }
     })
@@ -102,6 +198,9 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       title: t.String(),
       description: t.Optional(t.String()),
       assigneeId: t.Optional(t.String()),
+      assigneeIds: t.Optional(t.Array(t.String())),
+      participantIds: t.Optional(t.Array(t.String())),
+      parentTaskId: t.Optional(t.Nullable(t.String())),
       requirementIds: t.Optional(t.Array(t.String())),
       estimatedHours: t.Optional(t.Number()),
       projectId: t.Optional(t.String())
@@ -118,15 +217,9 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
     const task = await prisma.task.findUnique({
       where: { id: params.id },
       include: {
-        assignee: { select: { id: true, name: true, email: true } },
-        requirements: {
-          include: { requirement: true }
-        },
+        ...taskInclude,
         bugs: {
           select: { id: true, title: true, status: true, severity: true }
-        },
-        workLogs: {
-          include: { user: { select: { id: true, name: true } } }
         }
       }
     })
@@ -140,11 +233,14 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
   })
   // Update task
   .put('/:id', async ({ params, body, set, user }) => {
-    const { title, description, status, assigneeId, estimatedHours } = body as {
+    const { title, description, status, assigneeId, assigneeIds, participantIds, parentTaskId, estimatedHours } = body as {
       title?: string
       description?: string
       status?: string
-      assigneeId?: string
+      assigneeId?: string | null
+      assigneeIds?: string[]
+      participantIds?: string[]
+      parentTaskId?: string | null
       estimatedHours?: number
     }
 
@@ -154,24 +250,51 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       return { error: { code: 'NOT_FOUND', message: 'Task not found' } }
     }
 
+    if (parentTaskId === params.id) {
+      set.status = 400
+      return { error: { code: 'VALIDATION_ERROR', message: 'A task cannot be its own parent' } }
+    }
+
+    if (parentTaskId) {
+      const parentTask = await prisma.task.findUnique({
+        where: { id: parentTaskId },
+        select: { projectId: true }
+      })
+      if (!parentTask || parentTask.projectId !== existing.projectId) {
+        set.status = 400
+        return { error: { code: 'VALIDATION_ERROR', message: 'Parent task must belong to the same project' } }
+      }
+    }
+
     // Check permission: tasks.edit OR admin/tech_lead for backward compat
     if (!user || (!hasPermission(user, 'tasks.edit') && user.role !== 'admin' && user.role !== 'tech_lead')) {
       // Developers can only update status
-      if (user?.role === 'developer' && (title || description || assigneeId || estimatedHours)) {
+      if (user?.role === 'developer' && (title || description || assigneeId || assigneeIds || participantIds || parentTaskId || estimatedHours)) {
         set.status = 403
         return { error: { code: 'FORBIDDEN', message: "Permission denied: 'tasks.edit' is required" } }
       }
     }
 
+    const shouldReplaceParticipants = Array.isArray(participantIds) || Array.isArray(assigneeIds) || assigneeId !== undefined
+    const normalizedParticipantIds = shouldReplaceParticipants
+      ? normalizeParticipantIds(assigneeId, participantIds, assigneeIds)
+      : []
+
     const task = await prisma.task.update({
       where: { id: params.id },
-      data: { title, description, status, assigneeId, estimatedHours },
-      include: {
-        assignee: { select: { id: true, name: true } },
-        requirements: {
-          include: { requirement: { select: { id: true, title: true } } }
-        }
-      }
+      data: {
+        title,
+        description,
+        status,
+        assigneeId,
+        parentTaskId,
+        estimatedHours,
+        participants: shouldReplaceParticipants ? {
+          deleteMany: {},
+          create: normalizedParticipantIds.map(userId => ({ userId }))
+        } : undefined
+      },
+      include: taskInclude
     })
 
     return { task }

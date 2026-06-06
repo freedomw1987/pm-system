@@ -144,33 +144,29 @@ let permissionsSeeded = false
 async function seedRolePermissions(prisma: any) {
   // Seed permissions only once per process lifetime
   if (!permissionsSeeded) {
-    await Promise.all(
-      DEFAULT_PERMISSIONS.map((permission) =>
-        prisma.permission.upsert({
-          where: { key: permission.key },
-          update: {
-            name: permission.name,
-            category: permission.category,
-          },
-          create: permission,
-        })
-      )
-    )
+    for (const permission of DEFAULT_PERMISSIONS) {
+      await prisma.permission.upsert({
+        where: { key: permission.key },
+        update: {
+          name: permission.name,
+          category: permission.category,
+        },
+        create: permission,
+      })
+    }
     permissionsSeeded = true
   }
 
-  await Promise.all(
-    DEFAULT_ROLES.map((role) =>
-      prisma.role.upsert({
-        where: { name: role.name },
-        update: {
-          description: role.description,
-          // Only update isBuiltIn flag for built-in roles; do NOT reset permissions
-        },
-        create: role,
-      })
-    )
-  )
+  for (const role of DEFAULT_ROLES) {
+    await prisma.role.upsert({
+      where: { name: role.name },
+      update: {
+        description: role.description,
+        // Only update isBuiltIn flag for built-in roles; do NOT reset permissions
+      },
+      create: role,
+    })
+  }
 }
 
 function requireAdminOrPermission(user: { role?: string } | null | undefined, set: any, permission: string) {
