@@ -19,7 +19,15 @@ RUN bun install --frozen-lockfile
 COPY prisma ./prisma
 COPY src ./src
 COPY tsconfig.json ./
-RUN bunx prisma generate
+# Prisma 7 reads prisma.config.ts at CLI startup (db push / migrate / generate).
+# Without this, runtime container's `prisma db push` throws
+# "datasource.url is required" — see REGRESSION-GUARD.md RG-011.
+COPY prisma.config.ts ./
+# `prisma generate` itself doesn't need a real DATABASE_URL, but prisma.config.ts
+# uses `env("DATABASE_URL")` which throws if undefined (Prisma 7 strict
+# config validation). Pass a dummy at build time — runtime container sets
+# the real one. See: https://github.com/prisma/prisma/issues/28590
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build bunx prisma generate
 
 # ─── Stage 2: Runtime ───────────────────────────────────────────────────────
 # Slim runtime image — reuses builder's node_modules (already installed +
@@ -40,6 +48,9 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy schema (needed at runtime for `prisma migrate deploy` on container
 # start, and for some Prisma client internals that resolve schema path).
 COPY --from=builder /app/prisma ./prisma
+
+# Prisma 7 reads prisma.config.ts at CLI startup — see builder stage comment.
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 
 # Copy source code only (no tests, no .env, no README)
 COPY --from=builder /app/src ./src

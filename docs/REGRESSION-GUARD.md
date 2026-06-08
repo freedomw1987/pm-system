@@ -146,6 +146,54 @@
   - `REGRESSION-GUARD.md` 確認有 RG-009 entry
 - **Ref**: TECH-DEBT.md TD-004 (cache cleanup 部分) + TD-014 嘅 project-role reorg
 
+### RG-011: Backend Dockerfile 漏 COPY prisma.config.ts — Prisma 7 CLI throw datasource.url required(2026-06-09 發現)
+
+- **發現日期**: 2026-06-09(Sprint 5 closure)
+- **Symptom**: `docker compose up -d --build backend` 撞 build 成功,但 container start 跑 `bunx prisma db push` 時 throw:
+  ```
+  Prisma schema loaded from prisma/schema.prisma.
+  Error: The datasource.url property is required in your Prisma config file when using prisma db push.
+  ```
+  跟住 container exit(1),frontend 可以起但 backend 起唔到,**E2E 完全跑唔到**。
+- **Root cause** (2 layers):
+  1. `3bbb8b7` (Sprint 3) 加 `backend/prisma.config.ts` 處理 Prisma 7 strict config validation(由 `url = env("DATABASE_URL")` 取代 `url = process.env["DATABASE_URL"]`),但
+  2. **Dockerfile 從來冇 `COPY prisma.config.ts`** — 舊 `oven/bun:1-alpine` Dockerfile 只 COPY `prisma/`(schema),`prisma.config.ts` 喺 backend 根目錄,build 時冇 bake 入 image,亦冇 `--from=builder` copy 到 runtime stage。
+  3. Bonus: `bunx prisma generate` 喺 builder stage 都會 load `prisma.config.ts`,雖然 `prisma generate` 唔需要 DATABASE_URL,但 `env("DATABASE_URL")` strict helper 撞 undefined var 即 throw `PrismaConfigEnvError: Cannot resolve environment variable: DATABASE_URL`。
+- **Fix**:
+  - `backend/Dockerfile` builder stage 加 `COPY prisma.config.ts ./` + `RUN DATABASE_URL=postgresql://build:***@localhost:5432/build bunx prisma generate`(dummy URL 過 `env()` strict check)
+  - `backend/Dockerfile` runtime stage 加 `COPY --from=builder /app/prisma.config.ts ./prisma.config.ts`(runtime container 嘅 `prisma db push` 同樣要讀 config)
+  - `backend/prisma.config.ts` 改用 `import { defineConfig, env } from "prisma/config"` + `url: env("DATABASE_URL")`(本來 `process.env["..."]`,Prisma 7 strict validation 唔 accept)
+- **Prevention**:
+  - 任何 Prisma 7 嘅 `prisma.config.*` 引入 Dockerfile 時,**必須 audit `COPY` line** 是否 bake 入 image
+  - Builder stage 跑 `prisma generate` 時必須 pass dummy env var 過 `env()` strict helper(URL 唔需要真實,runtime container 有真實 env)
+  - 加 regression test: production image 必須含齊關鍵 CLI config file(以 `docker run --rm <image> ls /app/prisma.config.ts` 守住)
+- **Regression test**: 🔜 下個 sprint:加 `verify-docker-config.test.ts` 跑 `docker run --rm pm-system-backend ls /app/prisma.config.ts`,assert exit 0 + stdout 有 `prisma.config.ts`
+- **Ref**: TECH-DEBT.md Sprint 5 closure 註腳;GitHub issue [#28590](https://github.com/prisma/prisma/issues/28590)
+
+### RG-010: WS handler helpers — pure function extraction(TD-014 closure, 2026-06-09)
+
+- **發現日期**: 2026-06-09(Sprint 5)
+- **Symptom**: Sprint 3 retro 發現 `bun:test` 嘅 `mock.module` 對 ESM hoist 唔可靠, in-process WS integration test 撞 open handler 嘅真 prisma load 失效,WS 返 1006 abnormal closure。Sprint 3 嘅 fallback 係用 `e2e/tests/llm-ws-e2e.spec.ts` 跑真 wire test 守住。
+- **Root cause**: WS auth gate (line 358-414 嘅 open handler) 入面混雜咗 URL parsing + DB lookup + close code + welcome message 構造,**冇一處可以 unit test 唔需要 boot WS server**。
+- **Fix** (Sprint 5):
+  - 抽 `backend/src/agent/ws-handler-helpers.ts`(3 個 pure function + 1 個 type + 1 個 version constant):
+    - `extractWsAuthParams(rawUrl)` — parse `ws://...?token=&agentId=` query string
+    - `wsCloseCodeForReason(reason)` — 4001/4002/4003/1000/1011 mapping
+    - `buildAgentWelcomeMessage(agentId, msg, issuedAtMs)` — 構造 JSON(注入 timestamp 保 deterministic)
+  - 新增 `backend/src/agent/ws-handler-helpers.test.ts` — 17 unit test 守住
+  - refactor `backend/src/agent/runtime.ts` 嘅 WS auth gate open handler 用新 helper(4 個 close site + 1 個 welcome message 全部改用 helper)
+- **Prevention**:
+  - 任何混雜 I/O 嘅 callback/handler 入面,**至少要將 pure 邏輯抽可獨立 unit test 嘅 helper**(URL parse / 構造 payload / close code mapping / state transition 等等)
+  - 唔可以依賴 E2E / 真 wire test 做為唯一守住 — in-process unit test 提供最快 feedback loop
+  - 守住 helper signature 唔好亂改 — 用 `__WS_HELPER_VERSION__` constant + 守住 test 防止 silent drift
+- **Regression test**: ✅ 2026-06-09 加(`backend/src/agent/ws-handler-helpers.test.ts` 17 tests):
+  - `extractWsAuthParams` 6 tests — `ws://` + `wss://` schemes、missing params、URL-encoded tokens
+  - `wsCloseCodeForReason` 6 tests — 每個 reason mapping 守住 + unknown reason fallback
+  - `buildAgentWelcomeMessage` 4 tests — JSON shape、deterministic、no-shared-state
+  - `__WS_HELPER_VERSION__` 守住(pinned 1.0.0)
+  - 守住:`cd backend && bun test src/agent/ws-handler-helpers.test.ts` → 17/17 pass
+- **Ref**: TECH-DEBT.md TD-014 完整 closure
+
 ### RG-008: /api/auth/login 冇 rate limit — 可暴力破解(2026-06-09 發現)
 
 - **發現日期**: 2026-06-09

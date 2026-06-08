@@ -394,30 +394,35 @@ export default function WorkLogsPage() {
               </div>
             </div>
             <div className="card p-4 lg:p-6 lg:col-span-1">
-              <button onClick={() => {
-                const exportData = groupedData.map(g => ({
-                  '分組': g.name,
-                  '部門': g.department || '-',
-                  '時數': g.totalHours,
-                  '筆數': g.count
-                }))
-                const ws2 = new ExcelJS.Workbook()
-                const sheet2 = ws2.addWorksheet(`分組_${groupBy}`)
-                sheet2.columns = [
-                  { header: '分組', key: '分組', width: 20 },
-                  { header: '部門', key: '部門', width: 14 },
-                  { header: '時數', key: '時數', width: 8 },
-                  { header: '筆數', key: '筆數', width: 8 }
-                ]
-                exportData.forEach(row => sheet2.addRow(row))
-                const buf = await ws2.xlsx.writeBuffer()
-                const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `工作時數_${groupBy}_${new Date().toISOString().split('T')[0]}.xlsx`
-                a.click()
-                URL.revokeObjectURL(url)
+              <button onClick={async () => {
+                try {
+                  const exportData = groupedData.map(g => ({
+                    '分組': g.name,
+                    '部門': g.department || '-',
+                    '時數': g.totalHours,
+                    '筆數': g.count
+                  }))
+                  const ws2 = new ExcelJS.Workbook()
+                  const sheet2 = ws2.addWorksheet(`分組_${groupBy}`)
+                  sheet2.columns = [
+                    { header: '分組', key: '分組', width: 20 },
+                    { header: '部門', key: '部門', width: 14 },
+                    { header: '時數', key: '時數', width: 8 },
+                    { header: '筆數', key: '筆數', width: 8 }
+                  ]
+                  exportData.forEach(row => sheet2.addRow(row))
+                  const buf = await ws2.xlsx.writeBuffer()
+                  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `工作時數_${groupBy}_${new Date().toISOString().split('T')[0]}.xlsx`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch (err) {
+                  console.error('Failed to export grouped Excel:', err)
+                  alert('分組導出失敗，請重試')
+                }
               }} className="btn-secondary w-full flex items-center justify-center gap-2">
                 <Download size={20} />
                 <span>導出分組</span>

@@ -256,3 +256,4 @@
 | 2026-06-09 | Sprint 4 closure:TD-008 ✅(rate limit + 移除 cache),RG-007 + RG-008 entries,9 個新 unit test |
 | 2026-06-09 | TD-008 進度更新 — 5 個 rate-limit unit test pass,RG-008 regression test 守住 |
 | 2026-06-09 | Sprint 5:TD-003 / TD-004 / TD-014 全部清,P0 debt 100% 清除;Dockerfile multi-stage(673→651MB,-3.3%);RBAC cache dead code 殘留清(RG-009);WS handler 抽純 helpers 17 unit test(RG-010);499/499 unit test pass;frontend `WorkLogsPage.tsx:413 await in forEach` pre-existing issue 阻 docker stack 起,E2E 留住下一步 fix |
+| 2026-06-09 | Sprint 5 closure 2:frontend build fix(async onClick + try/catch)+ Dockerfile 漏 COPY prisma.config.ts(RG-011,Prisma 7 strict config)+ prisma.config.ts 改用 `env()` helper;docker compose up -d OK,E2E 13/17 pass(4 個 rbac-negative 失敗因 rate-limit 5/60s 撞 manual + 11 login attempts,屬 E2E 設計問題非 code bug) |
