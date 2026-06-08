@@ -30,7 +30,7 @@ function errorResponse(set: any, status: number, code: string, message: string) 
   return { error: { code, message } }
 }
 
-function normalizeChatCompletionUrl(apiUrl: string) {
+export function normalizeChatCompletionUrl(apiUrl: string) {
   const trimmed = apiUrl.trim().replace(/\/+$/, '')
   if (trimmed.endsWith('/chat/completions')) return trimmed
   return `${trimmed}/chat/completions`
@@ -182,7 +182,7 @@ async function searchWikiPages(projectId: string, query: string, limit = DEFAULT
     .slice(0, take)
 }
 
-function sseChunk({ id, model, content, finishReason = null }: SSEEmitOptions) {
+export function sseChunk({ id, model, content, finishReason = null }: SSEEmitOptions) {
   return {
     id,
     object: 'chat.completion.chunk',
@@ -198,7 +198,7 @@ function sseChunk({ id, model, content, finishReason = null }: SSEEmitOptions) {
   }
 }
 
-function toolActivityEvent(options: {
+export function toolActivityEvent(options: {
   id: string
   model: string
   status: 'started' | 'completed' | 'failed'
@@ -251,7 +251,7 @@ function toolActivityEvent(options: {
   }
 }
 
-function encodeSSEData(data: unknown) {
+export function encodeSSEData(data: unknown) {
   return `data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`
 }
 
@@ -1274,7 +1274,7 @@ async function callLLMWithTools(options: {
   }
 }
 
-async function streamLLMResponse(options: {
+export async function streamLLMResponse(options: {
   sessionId: string
   userId: string
   userRole: string

@@ -1,6 +1,6 @@
 # PM System — Tech Debt Register
 
-> **Status**: 2026-06-08 snapshot
+> **Status**: 2026-06-08 snapshot (Sprint 3 ACT-14/15 closure)
 > **Format**: 模板化追蹤,參考 `tech-debt-register` skill
 
 ---
@@ -97,6 +97,33 @@
 - **業務影響**: Low — 公司喺同一時區
 - **建議**: P2,將來如有 remote 才做
 
+### 🟡 TD-013: US-8.1/8.2/9.3 unit test 缺失(Sprint 2 retro ACT-14/15)
+
+- **發現日期**: 2026-06-08(Sprint 2 retro ACT-14, ACT-15)
+- **症狀**: `chat.ts` 1787 行嘅 `streamLLMResponse` 同 `agent/runtime.ts` 645 行嘅 WebSocket life cycle 喺 Sprint 1 收工時係 0 test 嘅 P0 US
+- **2026-06-08 進展**: ✅ **已修** — Sprint 3 commit:
+  - `chat.ts` 加 5 個 `export` keyword (`streamLLMResponse` / `sseChunk` / `toolActivityEvent` / `encodeSSEData` / `normalizeChatCompletionUrl`) — **純 testability 改善, 0 runtime 改動**
+  - `backend/src/routes/chat-integration.test.ts` (22 tests) — mock `globalThis.fetch` 攔截 LLM outbound, assert SSE event shape
+  - `backend/src/agent/runtime-ws-integration.test.ts` (17 tests) — derive helper pattern(Sprint 1+2 復用)守住 message envelope + state transition
+  - `e2e/tests/llm-ws-e2e.spec.ts` (4 tests) — Playwright + 真 wire verify `nginx :8080 → backend :4001` 通
+- **守住**:
+  - `cd backend && bun test` → 372 pass / 0 fail (Sprint 2: 333 pass)
+  - `cd e2e && npx playwright test` → 17/17 pass (Sprint 2: 13/13)
+  - P0 US PASS-INT 由 23/29 (79%) → 26/29 (90%)
+- **Sprint 3 retro 參考**: `docs/retros/2026-06-08-sprint-3-act14-15-closure.md`
+
+### 🟡 TD-014: WS 真連線 life cycle 喺 in-process mock 失效
+
+- **發現日期**: 2026-06-08(Sprint 3 過程中)
+- **症狀**: 嘗試用 `bun:test` 嘅 `mock.module('../utils/prisma', ...)` mock prisma 之後, 起 `Bun.serve({port: 0, fetch: app.fetch, websocket: app.websocket})`, connect 落 `ws://localhost:port/ws/agents/?token=...&agentId=...`, 期望 WS auth gate 攔截 + close 4001/4002/4003。但 `mock.module` 對 ESM hoist 唔可靠, WS open handler 喺 import 時已經 load 咗真 prisma, mock 失效, WS 返 1006 abnormal closure。
+- **影響**:
+  - 🟡 **in-process WS integration test 唔可行** — `bun:test` 嘅 mock 機制對 ESM 限制
+  - 🟢 **真 wire test 可以做** — `e2e/tests/llm-ws-e2e.spec.ts` 用 docker stack + 真 `node:ws` 連 `ws://localhost:4001/ws/agents/` 攞 4001 close(已 work)
+  - 🟢 **WS helper 邏輯守住** — `runtime-ws-integration.test.ts` 用 derive helper pattern 守住 17 個 invariants
+- **修復成本**: 0.5-1 日(setup docker PG test fixture + 改用 `node:ws` client 連 dev backend)
+- **業務影響**: Medium — 將來 refactor WS handler 唔會有 in-process regression test
+- **建議**: P1, Sprint 4 scope
+
 ### 🟢 TD-010: 冇 logging aggregation
 
 - **發現日期**: 2026-06-08
@@ -158,7 +185,16 @@
 - [ ] TD-003: Dockerfile 優化
 - [ ] TD-004: RBAC consolidate
 - [ ] TD-008: Rate limiting
-- [ ] TD-012: host test env(其實已修 ✅,放呢度做 reference)
+- [x] TD-012: host test env(其實已修 ✅,放呢度做 reference)
+
+### Sprint 3 (P0 follow-up) — ✅ DONE
+- [x] TD-013: US-8.1/8.2/9.3 unit test(Sprint 2 retro ACT-14/15)— 39 backend tests + 4 Playwright tests
+- [x] TD-011: Backend auth derive hook 撞不存在 UUID throw 500(Sprint 1 retro)
+
+### Sprint 4 (P1)
+- [ ] TD-003: Dockerfile alpine multi-stage
+- [ ] TD-008: Login rate limit
+- [ ] TD-014: WS 真連線 life cycle in-process test(docker PG 連 dev backend)
 
 ### Backlog (P2)
 - [ ] TD-005, TD-006, TD-007, TD-009, TD-010
@@ -177,3 +213,6 @@
 | 2026-06-08 | 新增 TD-012:host `bun test` 撞 `.prisma/client/default` 缺失 |
 | 2026-06-08 | TD-012 完成 ✅ — `package.json` 加 `pretest: bunx prisma generate`,host 45/45 pass(commit `03f59c2`) |
 | 2026-06-08 | Sprint 1 行動計劃 tick 完:TD-001 ✅ + TD-002 ✅ |
+| 2026-06-08 | Sprint 2 retro 增 TD-013(US-8.1/8.2/9.3 unit test missing)— Sprint 3 closure ✅ |
+| 2026-06-08 | Sprint 3 closure:TD-013 完成 ✅ — 39 backend tests + 4 Playwright tests, P0 US 紅線 12 推 79%→90% |
+| 2026-06-08 | 新增 TD-014(WS 真連線 in-process mock 失效)— bun:test mock.module ESM hoist 限制 |
