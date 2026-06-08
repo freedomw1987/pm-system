@@ -90,26 +90,36 @@ const app = new Elysia()
         const [userId, role] = token.split(':')
         if (!userId) return { user: null }
 
-        // Load permissions for this role from cache/DB
-        const permissions = role ? await loadRolePermissions(role) : []
-
-        // Load agent info if applicable
+        // Load agent info + validate user actually exists (TD-011 fix)
+        // 唔加呢行 → fake UUID token 過 derive hook,route handler 之後撞
+        // `prisma.user.create / project.create` FK constraint 然後 throw 500
         const prisma = getPrisma()
         const dbUser = await prisma.user.findUnique({
           where: { id: userId },
-          select: { isAgent: true, agentConfig: true }
+          select: { isAgent: true, agentConfig: true, role: true }
         })
+        if (!dbUser) {
+          // Token format valid 但 user 真實唔存在 → 視為 auth-missing
+          return { user: null }
+        }
+
+        // Load permissions for this role from cache/DB
+        const effectiveRole = dbUser.role || role || 'developer'
+        const permissions = await loadRolePermissions(effectiveRole)
 
         return {
           user: {
             id: userId,
-            role: role || 'developer',
+            role: effectiveRole,
             permissions,
-            isAgent: dbUser?.isAgent ?? false,
-            agentConfig: dbUser?.agentConfig ?? null
+            isAgent: dbUser.isAgent,
+            agentConfig: dbUser.agentConfig
           }
         }
-      } catch {
+      } catch (err) {
+        // 任何 prisma / DB error 都要 graceful fall-through
+        // (TD-011 同類 — 唔好 leak 500)
+        console.error('[auth derive] unexpected error:', err)
         return { user: null }
       }
     })

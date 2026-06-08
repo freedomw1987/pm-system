@@ -47,7 +47,7 @@
 | **Epic 7: RBAC** | | | | | | |
 | US-7.1 自定義角色 | P0 | ❌ | ❌ | ❌ | NONE 🔴 | TBD |
 | US-7.2 改用戶角色 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-7.3 middleware 擋 | P0 | ✅ permission.test.ts | ❌ | ✅ rbac-negative | **NONE → PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
+| US-7.3 middleware 擋 | P0 | ✅ permission.test.ts | ❌ | ✅ rbac-negative | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
 | US-7.4 項目層覆寫 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 8: AI Chat** | | | | | | |
 | US-8.1 自然語言查詢 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -121,6 +121,7 @@
 | 2026-06-08 | Sprint 1 補 test 行動:3 份新 test (RBAC/WorkLog/Agent),3 個 P0 US 升至 PASS-UNIT,coverage 5%→25% |
 | 2026-06-08 | Sprint 1 補 E2E:Playwright + critical-path.spec.ts,3 tests 過,5 個 P0 US 升至 PASS-E2E |
 | 2026-06-08 | Sprint 1 補 E2E RBAC negative:rbac-negative.spec.ts,10 tests 過,US-7.3 升至 PASS-UNIT+PASS-E2E |
+| 2026-06-08 | Fix TD-011(derive hook + role 從 DB 攞),E2E 500→403 |
 
 ---
 

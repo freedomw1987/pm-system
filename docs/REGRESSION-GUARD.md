@@ -72,6 +72,28 @@
 - **Ref**: commit `7f43cba` fix: backend bug
 - **Action item**: 🟡 補完整 record(下個 sprint)
 
+### RG-006: Auth derive hook 對 fake UUID token throw 500(2026-06-08 E2E 發現)
+
+- **發現日期**: 2026-06-08
+- **Symptom**: 用 well-formatted 但不存在嘅 user UUID 嘅 token POST /api/projects
+  收到 `HTTP 500 Internal Server Error`,backend log 見 `prisma.project.create()` 撞
+  `Foreign key constraint violated on the constraint: projects_created_by_id_fkey`
+- **Root cause**: backend/src/index.ts derive hook(line 80-115)對 fake UUID token:
+  1. `dbUser = null`(findUnique 唔 returns)
+  2. 但用 `userId` 從 token 推斷 role,fall through 過 RBAC check
+  3. Route handler (POST /api/projects) 寫 `createdById: user.id` 撞 FK
+  4. Prisma throw 500
+- **Fix**:
+  - derive hook 加 `if (!dbUser) return { user: null }` 早 return
+  - 順手修 **privilege escalation**:改用 `dbUser.role` 而唔係 token 嘅 role 字串
+    (原本 `Bearer fake-uuid:admin` 都可以 claim admin perms)
+  - 加 `console.error` 喺 catch block 方便 debug
+- **Prevention**: derive hook 必須嚴格驗 user 真實存在 + role 由 DB 攞(never trust client)
+- **Regression test**: ✅ 2026-06-08 fix 後加返(`e2e/tests/rbac-negative.spec.ts` line 125)
+  - 預期 403 FORBIDDEN(graceful auth-missing)
+  - 順手 verify privilege escalation 守住(同一 fake token 唔再可以 access admin endpoint)
+- **Ref**: TECH-DEBT.md TD-011
+
 ---
 
 ## 3. Pattern 觀察
@@ -108,6 +130,7 @@ describe('RG-XXX: <bug 簡述>', () => {
 | 日期 | 變更 |
 |------|------|
 | 2026-06-08 | 初版 5 entries(derive 自 git log) |
+| 2026-06-08 | 加 RG-006:Auth derive hook 撞 fake UUID throw 500(由 TD-011 衍生,fix 後補 regression test) |
 
 ---
 

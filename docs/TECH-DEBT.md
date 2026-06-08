@@ -85,6 +85,9 @@
 - **業務影響**: High — security(可被用嚟探測 valid user ID),UX(500 對 client 嚟講 confusing)
 - **建議**: P0,security bug
 - **守住**:`e2e/tests/rbac-negative.spec.ts` line 125 預期 500,將來 fix 改 `[401, 403]`
+- **2026-06-08 進展**: ✅ **已修** — derive hook 加 `if (!dbUser) return { user: null }` +
+  改用 `dbUser.role` 而唔係 token 嘅 role(順手封咗 privilege escalation)。
+  E2E test 由 500 → 403,全部 13 個 E2E 過
 
 ### 🟢 TD-009: WorkLog 冇 timezone 處理
 
@@ -143,3 +146,4 @@
 | 2026-06-08 | TD-001 進展:3 份新 test,3 P0 US 升至 PASS-UNIT |
 | 2026-06-08 | TD-002 完成 ✅ — Playwright E2E + critical-path.spec.ts |
 | 2026-06-08 | 新增 TD-011:Backend auth derive hook 撞不存在 UUID throw 500(security bug)|
+| 2026-06-08 | TD-011 完成 ✅ — derive hook 加 user existence check + 改用 dbUser.role,E2E 500→403 |

@@ -122,20 +122,19 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
     expect(res.status()).toBe(403)
   })
 
-  test('non-existent user token: backend currently returns 500 (KNOWN BUG TD-XXX)', async ({ request }) => {
-    // 🐛 DISCOVERED BUG: 2026-06-08 E2E 過程發現
-    // Backend 對 well-formatted UUID 但不存在嘅 user,prisma.findUnique throw
-    // → 500 internal error。應該 graceful 403 (auth-missing)。
-    // 守住呢個行為:現時 500,將來如果修好要 update 呢個 test
-    // 參考 backend/src/index.ts derive hook (~line 98-100)
+  test('non-existent user token: returns 403 (TD-011 FIXED)', async ({ request }) => {
+    // ✅ FIXED 2026-06-08: backend/src/index.ts derive hook 而家先 check user 真實存在
+    // 之前 fake UUID token 會過 derive hook,落到 project.create 撞 FK constraint 然後 500
+    // 修咗之後:derive hook `if (!dbUser) return { user: null }` → permission check fail → 403
+    // 同時亦修咗 privilege escalation(用 dbUser.role 而唔係 token 嘅 role 字串)
     const fakeUuid = '00000000-0000-0000-0000-000000000000'
     const res = await request.post(`${BACKEND}/api/projects`, {
       headers: { Authorization: `Bearer ${fakeUuid}:admin` },
       data: { name: 'E2E Negative Project' },
     })
-    // 期待 fix 後改 [401, 403]
-    expect(res.status()).toBe(500)
-    // TODO: TD-XXX — fix prisma.findUnique error handling in auth derive
+    expect(res.status()).toBe(403)
+    const body = await res.json()
+    expect(body.error?.code).toBe('FORBIDDEN')
   })
 
   // ── Positive control: admin 同一個 endpoint 應該成功(證明 403 唔係 false positive) ──
