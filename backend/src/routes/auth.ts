@@ -1,10 +1,27 @@
 import { Elysia, t } from 'elysia'
 import bcrypt from 'bcryptjs'
 import { v4 as uuidv4 } from 'uuid'
+import { rateLimit } from '../utils/rate-limit'
 
 const authRoutes = new Elysia({ prefix: '/auth' })
-  .post('/login', async ({ body, set, cookie: { refreshToken } }) => {
+  .post('/login', async ({ body, set, request, cookie: { refreshToken } }) => {
     const { email, password } = body as { email: string; password: string }
+
+    // TD-008: IP-based rate limit (5 attempts / 60s) — block brute force (RG-008)
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      ?? request.headers.get('x-real-ip')
+      ?? 'unknown'
+    const limit = rateLimit({ key: `login:${ip}`, limit: 5, windowMs: 60_000 })
+    if (!limit.ok) {
+      set.status = 429
+      set.headers['retry-after'] = String(Math.ceil(limit.resetMs / 1000))
+      return {
+        error: {
+          code: 'TOO_MANY_REQUESTS',
+          message: `Too many login attempts. Try again in ${Math.ceil(limit.resetMs / 1000)}s.`
+        }
+      }
+    }
 
     const { prisma } = await import('../utils/prisma')
     const user = await prisma.user.findUnique({ where: { email } })

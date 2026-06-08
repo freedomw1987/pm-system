@@ -24,33 +24,29 @@ import { PrismaClient } from '@prisma/client'
 import { prisma } from './utils/prisma'
 import { setRolePermissions } from './middleware/permission'
 
-// ─── In-memory role permissions cache ────────────────────────────────────────
-// Loaded from DB once per role. Managed by index.ts. Callers use setRolePermissions().
-const rolePermissionCache = new Map<string, string[]>()
+// ─── Role permissions loader (RG-007 fix) ─────────────────────────────────────
+// No in-memory cache — RBAC changes take effect immediately for all users.
+// 1-2ms per request overhead is acceptable for internal PM system (traffic low).
+// Permission array queried fresh from DB on every authenticated request.
 
 function getPrisma(): PrismaClient {
   return prisma
 }
 
 async function loadRolePermissions(roleName: string): Promise<string[]> {
-  const cached = rolePermissionCache.get(roleName)
-  if (cached !== undefined) return cached
-
   const prisma = getPrisma()
   const role = await prisma.role.findUnique({ where: { name: roleName } })
   const permissions = role?.permissions ?? []
-  rolePermissionCache.set(roleName, permissions)
-  // Also sync to middleware cache (single source of truth)
+  // Sync to middleware map (hasPermission reads from user.permissions directly,
+  // but we keep middleware map for any future readers + backward compat)
   setRolePermissions(roleName, permissions)
   return permissions
 }
 
 export async function refreshAllRolePermissions() {
-  rolePermissionCache.clear()
   const prisma = getPrisma()
   const roles = await prisma.role.findMany({ select: { name: true, permissions: true } })
   for (const role of roles) {
-    rolePermissionCache.set(role.name, role.permissions)
     setRolePermissions(role.name, role.permissions)
   }
 }
@@ -103,7 +99,8 @@ const app = new Elysia()
           return { user: null }
         }
 
-        // Load permissions for this role from cache/DB
+        // Load permissions for this role from DB (no cache — RG-007)
+        // 改完 role permissions 即時生效,唔再需要 docker compose restart
         const effectiveRole = dbUser.role || role || 'developer'
         const permissions = await loadRolePermissions(effectiveRole)
 
