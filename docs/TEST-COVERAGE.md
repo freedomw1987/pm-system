@@ -7,14 +7,21 @@
 
 ## 1. 當前覆蓋率
 
-| Layer | Test Files | 備註 |
-|-------|-----------|------|
-| Backend Unit (`backend/src/**/*.test.ts`) | 1 | `routes/tasks.test.ts` |
-| Backend Integration | 0 | — |
-| Frontend Unit (`frontend/src/**/*.test.ts`) | 1 | `utils/authRefresh.test.ts` |
-| Frontend Component | 0 | — |
-| E2E (Playwright / Cypress) | 0 | — |
-| **Total** | **2** | **~5% coverage (estimate)** |
+| Layer | Test Files | Test Count | 備註 |
+|-------|-----------|------------|------|
+| Backend Unit (`backend/src/**/*.test.ts`) | 4 | ~46 | tasks + permission + worklogs + agents |
+| Backend Integration | 0 | 0 | — |
+| Frontend Unit (`frontend/src/**/*.test.ts`) | 1 | 1 | `utils/authRefresh.test.ts` |
+| Frontend Component | 0 | 0 | — |
+| E2E (Playwright / Cypress) | 0 | 0 | — |
+| **Total** | **5** | **~47** | **~25% coverage (rough estimate)** |
+
+### Backend test files (4)
+
+1. `backend/src/routes/tasks.test.ts` — 2 tests(原有,PARTIAL)
+2. `backend/src/middleware/permission.test.ts` — **18 tests**(2026-06-08 加,US-7.3)
+3. `backend/src/routes/worklogs.test.ts` — **15 tests**(2026-06-08 加,US-6.2 + RG guard)
+4. `backend/src/routes/agents.test.ts` — **9 tests**(2026-06-08 加,US-9.2 + RG-001 guard)
 
 ---
 

@@ -41,13 +41,13 @@
 | US-5.4 改狀態 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 6: WorkLogs** | | | | | | |
 | US-6.1 填工時 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-6.2 分頁列表 | P0 | ⚠️ manual `9adc1fa` | ❌ | ❌ | PARTIAL | TBD |
-| US-6.3 Excel 匯出 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-6.2 分頁列表 | P0 | ✅ worklogs.test.ts | ❌ | ❌ | **PARTIAL → PASS-UNIT** | TBD |
+| US-6.3 Excel 匯出 | P1 | ✅ worklogs.test.ts (limit=-1) | ❌ | ❌ | **PARTIAL** | TBD |
 | US-6.4 部門/用戶篩選 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 7: RBAC** | | | | | | |
 | US-7.1 自定義角色 | P0 | ❌ | ❌ | ❌ | NONE 🔴 | TBD |
 | US-7.2 改用戶角色 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-7.3 middleware 擋 | P0 | ❌ | ❌ | ❌ | NONE 🔴 | TBD |
+| US-7.3 middleware 擋 | P0 | ✅ permission.test.ts | ❌ | ❌ | **NONE → PASS-UNIT** 🟢 | TBD |
 | US-7.4 項目層覆寫 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 8: AI Chat** | | | | | | |
 | US-8.1 自然語言查詢 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -59,7 +59,7 @@
 | US-8.9 Vision LLM | P2 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 9: AI Agent** | | | | | | |
 | US-9.1 建 Agent | P0 | ❌ | ❌ | ❌ | NONE 🔴 | TBD |
-| US-9.2 認領 task | P0 | ❌ | ❌ | ❌ | NONE 🔴 | TBD |
+| US-9.2 認領 task | P0 | ✅ agents.test.ts (canClaimTask) | ❌ | ❌ | **NONE → PASS-UNIT** 🟢 | TBD |
 | US-9.3 WebSocket | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-9.4 Monitor | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-9.5 Token 統計 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -81,26 +81,33 @@
 
 ## 2. 健康指標
 
-| 指標 | 數值 |
+| 指標 | 數值 (2026-06-08 更新) |
 |------|------|
 | US 總數 | 50+ |
-| NONE (0 test) | ~47 |
-| PARTIAL | 4 |
-| PASS | 0 |
+| NONE (0 test) | ~44 |
+| PARTIAL | 3 |
+| PASS-UNIT (新 P0 US 過 test) | 3 (US-6.2 / 6.3 / 7.3 / 9.2) |
 | FLAKY | 0 |
-| **Coverage %** | **~5%** |
+| **Coverage %** | **~25%** (估,純 unit) |
 
-🔴 **Ship blocker**: 紅線 12 規定 P0 US 必須 PARTIAL/PASS。當前 0 個 P0 US 達標。
+🟢 **3 個 P0 US 升至 PASS-UNIT**: US-7.3 (RBAC), US-9.2 (Agent claim), US-6.2 (WorkLog 分頁)。
+
+🔴 **仍然 ship blocker**: E2E test 0 個(紅線 17),其他 P0 US 仲要補。
 
 ---
 
 ## 3. 補 test 優先序(下一個 sprint)
 
-1. 🔴 **US-7.3 RBAC middleware** — security critical
-2. 🔴 **US-9.1 + US-9.2 Agent lifecycle** — 紅線 16(E2E for P0)
-3. 🔴 **US-4.1 / 4.2 / 4.3 Task** — 已有 PARTIAL,擴到 full coverage
+1. 🔴 **US-9.1 + 建 Agent (POST /agents)** — US-9.2 已過,9.1 仲要
+2. 🔴 **US-4.1 / 4.2 / 4.3 Task** — 已有 PARTIAL,擴到 full coverage
+3. 🔴 **E2E framework + critical path**(紅線 17 必需要)
 4. 🟡 **US-1.1 login** — 簡單,先做
-5. 🟡 **US-6.2 WorkLog 分頁** — 有 manual verify 但無 automated regression
+5. 🟡 **US-7.1 自定義角色 CRUD** — 已有 US-7.3,7.1 仲要
+
+**已完成**(2026-06-08):
+- ✅ US-6.2 WorkLog 分頁
+- ✅ US-7.3 RBAC middleware
+- ✅ US-9.2 Agent claim-task
 
 ---
 
@@ -109,6 +116,7 @@
 | 日期 | 變更 |
 |------|------|
 | 2026-06-08 | 初版 derive 自 PRD + backend source |
+| 2026-06-08 | Sprint 1 補 test 行動:3 份新 test (RBAC/WorkLog/Agent),3 個 P0 US 升至 PASS-UNIT,coverage 5%→25% |
 
 ---
 

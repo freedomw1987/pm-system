@@ -16,6 +16,7 @@
 - **業務影響**: High — 改 RBAC / WorkLog pagination 可能撞牆
 - **建議**: P0 sprint 第一週做
 - **相關**: TEST-COVERAGE.md § 7 行動項目
+- **2026-06-08 進展**: Sprint 1 補 3 份 test(RBAC/WorkLog/Agent),coverage 5%→25%,3 P0 US PASS-UNIT
 
 ### 🔴 TD-002: 0 個 E2E 測試
 
@@ -24,6 +25,7 @@
 - **修復成本**: 3-5 個工作日(Playwright + fixture)
 - **業務影響**: High — 紅線 17 必需要 smoke test
 - **建議**: P0,跟 TD-001 同期
+- **2026-06-08 進展**: 仲未開始
 
 ### 🟡 TD-003: Backend Dockerfile runtime image 較大
 
@@ -128,3 +130,4 @@
 | 日期 | 變更 |
 |------|------|
 | 2026-06-08 | 初版 10 個 debt entry |
+| 2026-06-08 | TD-001 進展:3 份新 test,3 P0 US 升至 PASS-UNIT |

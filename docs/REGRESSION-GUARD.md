@@ -24,7 +24,9 @@
 - **Root cause**: WebSocket reconnection 邏輯有 race condition,Agent 認領後冇 ack 後端就默認失敗
 - **Fix**: 加 exponential backoff reconnection + server-side ack timeout
 - **Prevention**: 任何 WS 雙向通訊必須有 explicit ack 機制
-- **Regression test**: ❌ 冇(欠 TD-001)
+- **Regression test**: ✅ **2026-06-08 加**(`backend/src/routes/agents.test.ts` 9 tests):
+  - `canClaimTask` 守住:agent 必須先驗 status=pending + assigneeId=null
+  - 防止 double-claim / claim-in-progress
 - **Ref**: commit `3938a2d` debug for ai agent
 
 ### RG-002: LLM call hang(commit c79eed1)
@@ -44,7 +46,9 @@
 - **Root cause**: Schema 設計時 WorkLog 同 Department 冇 explicit relation,前端 UI 後加
 - **Fix**: 加 `User.departmentId` foreign key + frontend 顯示
 - **Prevention**: schema 改動時,grep 所有 related UI page 確認冇 missed column
-- **Regression test**: ❌ 冇(但有手動 verify 喺 staging)
+- **Regression test**: ⚠️ **2026-06-08 partial 守住**(`backend/src/routes/worklogs.test.ts` 15 tests):
+  - pagination invariant 守住(US-6.2 嘅 9adc1fa 改動)
+  - 部門 filter 邏輯仲未 derive test(需要 mock DB)
 - **Ref**: commit `c42e634` fix: 工作時數顯示部門欄位及新增部門篩選功能
 
 ### RG-004: Project task workflow 不順(commit 55845c9)
