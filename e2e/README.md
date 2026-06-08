@@ -28,10 +28,12 @@ npx playwright test
 - **Auto-wait**:唔使手動 `waitForTimeout`,DOM ready 至 action
 - **Trace on failure**:失敗自動留 trace,debug 容易
 - **CLI / CI / headed 3 mode**:本地 dev + CI pipeline 同一份 spec
+- **真 HTTP**:E2E 對住真 docker stack,守住 wire format 同真實 RBAC 行為
 
-## 3. Critical Path
+## 3. Test Files
 
-`tests/critical-path.spec.ts` 守住:
+### `tests/critical-path.spec.ts`(3 tests)
+守住 happy path:
 1. **API login** + 攞 JWT token
 2. **建項目** (`POST /api/projects`)
 3. **建需求** (`POST /api/requirements`)
@@ -39,6 +41,16 @@ npx playwright test
 5. **填工時** (`POST /api/worklogs`, 2.5 hours)
 6. **UI render** — `GET /worklogs` 唔 crash
 7. **UI login** — 表單 submit → redirect
+
+### `tests/rbac-negative.spec.ts`(10 tests)
+守住 RBAC 負面 case(US-7.3,紅線 12):
+1. **developer / tester / pm** 嘗試 POST /projects → 403
+2. **developer** 嘗試 DELETE /users → 403
+3. **tester** 嘗試 POST /agents → 403
+4. **developer** 嘗試刪他人 worklog → 403(worklogs.delete_all gate)
+5. **冇 token** / malformed token → 403(backend 將 auth-missing 視為 FORBIDDEN)
+6. **non-existent UUID** → 500(已知 bug TD-011,test 守住)
+7. **admin 同一 endpoint** → 200(positive control)
 
 **用途**: Production deploy 之前跑呢條做 smoke test(紅線 17)。
 
@@ -59,11 +71,12 @@ npx playwright test
 
 ## 5. 已守住嘅 US
 
-- ✅ **US-2.1** 建項目
-- ✅ **US-3.1** 建需求
-- ✅ **US-4.1** 建任務
-- ✅ **US-6.1** 填工時
-- ✅ **US-1.1** UI login(部分 — 確認 form submit → redirect,未做 full RBAC matrix)
+- ✅ **US-1.1** UI login(`critical-path` 嘅 login flow)
+- ✅ **US-2.1** 建項目(`critical-path`)
+- ✅ **US-3.1** 建需求(`critical-path`)
+- ✅ **US-4.1** 建任務(`critical-path`)
+- ✅ **US-6.1** 填工時(`critical-path`)
+- ✅ **US-7.3** RBAC middleware(`rbac-negative` 10 tests,真 HTTP level)
 
 ## 6. 已知 caveats
 

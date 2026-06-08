@@ -13,15 +13,20 @@
 | Backend Integration | 0 | 0 | — |
 | Frontend Unit (`frontend/src/**/*.test.ts`) | 1 | 1 | `utils/authRefresh.test.ts` |
 | Frontend Component | 0 | 0 | — |
-| E2E (Playwright / Cypress) | 1 | 3 | critical path + login + health check |
-| **Total** | **6** | **~50** | **~30% coverage (rough estimate)** |
+| E2E (Playwright / Cypress) | 2 | 13 | critical path + RBAC negative (US-7.3) |
+| **Total** | **7** | **~60** | **~35% coverage (rough estimate)** |
 
-### E2E test files (1)
+### E2E test files (2)
 
-5. `e2e/tests/critical-path.spec.ts` — **3 tests**(2026-06-08 加)
-   - 完整 happy path:login → 建項目 → 建需求 → 建任務 → 填工時
-   - health check:frontend + backend 都 reachable
-   - UI login flow:form submit → redirect 去 `/`
+5. `e2e/tests/critical-path.spec.ts` — 3 tests(2026-06-08 加)
+6. `e2e/tests/rbac-negative.spec.ts` — **10 tests**(2026-06-08 加,US-7.3):
+   - developer / tester / pm 嘗試 POST /projects → 403
+   - developer / tester 嘗試 DELETE /users → 403
+   - tester 嘗試 POST /agents → 403
+   - 冇 token / malformed token → 403(backend 將 auth-missing 視為 FORBIDDEN)
+   - 已知 bug:non-existent UUID token → 500(要 fix,見 TECH-DEBT)
+   - positive control:admin 同一 endpoint → 200
+   - developer 刪他人 worklog → 403(worklogs.delete_all gate)
 
 ### Backend test files (4)
 
@@ -144,3 +149,4 @@
 | 2026-06-08 | 初版 inventory |
 | 2026-06-08 | Sprint 1 補 unit test (3 份,42 tests) |
 | 2026-06-08 | Sprint 1 補 E2E (1 份,3 tests) — Playwright + critical path |
+| 2026-06-08 | Sprint 1 補 E2E RBAC negative (1 份,10 tests) — US-7.3 真 HTTP level 守住 |

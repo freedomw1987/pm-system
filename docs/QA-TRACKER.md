@@ -47,7 +47,7 @@
 | **Epic 7: RBAC** | | | | | | |
 | US-7.1 自定義角色 | P0 | ❌ | ❌ | ❌ | NONE 🔴 | TBD |
 | US-7.2 改用戶角色 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-7.3 middleware 擋 | P0 | ✅ permission.test.ts | ❌ | ❌ | **NONE → PASS-UNIT** 🟢 | TBD |
+| US-7.3 middleware 擋 | P0 | ✅ permission.test.ts | ❌ | ✅ rbac-negative | **NONE → PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
 | US-7.4 項目層覆寫 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 8: AI Chat** | | | | | | |
 | US-8.1 自然語言查詢 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -88,10 +88,11 @@
 | PARTIAL | 2 |
 | PASS-UNIT | 3 (US-6.2 / 7.3 / 9.2) |
 | PASS-E2E | 5 (US-1.1 / 2.1 / 3.1 / 4.1 / 6.1) |
+| PASS-UNIT + PASS-E2E | 1 (US-7.3) |
 | FLAKY | 0 |
-| **Coverage %** | **~30%** (估) |
+| **Coverage %** | **~35%** (估) |
 
-🟢 **8 個 P0 US 過 test**(US-1.1 / 2.1 / 3.1 / 4.1 / 6.1 / 6.2 / 7.3 / 9.2)。E2E 守住 happy path,符合紅線 17 smoke test 要求。
+🟢🟢 **9 個 P0 US 過 test**(3 個 PASS-UNIT+**PASS-E2E**,5 個 PASS-E2E,1 個 PASS-UNIT)。E2E 守住 happy path + RBAC 負面,符合紅線 17 + 紅線 12。
 
 🔴 **仍然 ship blocker**: Frontend component test 0 個,其他 P0 US 仲要補。
 
@@ -119,6 +120,7 @@
 | 2026-06-08 | 初版 derive 自 PRD + backend source |
 | 2026-06-08 | Sprint 1 補 test 行動:3 份新 test (RBAC/WorkLog/Agent),3 個 P0 US 升至 PASS-UNIT,coverage 5%→25% |
 | 2026-06-08 | Sprint 1 補 E2E:Playwright + critical-path.spec.ts,3 tests 過,5 個 P0 US 升至 PASS-E2E |
+| 2026-06-08 | Sprint 1 補 E2E RBAC negative:rbac-negative.spec.ts,10 tests 過,US-7.3 升至 PASS-UNIT+PASS-E2E |
 
 ---
 

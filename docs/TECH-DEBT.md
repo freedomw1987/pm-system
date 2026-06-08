@@ -76,6 +76,16 @@
 - **業務影響**: Medium(security)
 - **建議**: P1,security sprint
 
+### 🔴 TD-011: Backend auth derive hook 撞不存在 UUID 會 throw 500
+
+- **發現日期**: 2026-06-08(E2E rbac-negative 過程發現)
+- **影響**: `backend/src/index.ts` derive hook 對 well-formatted 但唔存在嘅 user UUID,
+  `prisma.user.findUnique` throw → 500 internal error。應該 graceful 403 / 401
+- **修復成本**: 0.1 日(wrap try-catch + return `{ user: null }`)
+- **業務影響**: High — security(可被用嚟探測 valid user ID),UX(500 對 client 嚟講 confusing)
+- **建議**: P0,security bug
+- **守住**:`e2e/tests/rbac-negative.spec.ts` line 125 預期 500,將來 fix 改 `[401, 403]`
+
 ### 🟢 TD-009: WorkLog 冇 timezone 處理
 
 - **發現日期**: 2026-06-08
@@ -132,3 +142,4 @@
 | 2026-06-08 | 初版 10 個 debt entry |
 | 2026-06-08 | TD-001 進展:3 份新 test,3 P0 US 升至 PASS-UNIT |
 | 2026-06-08 | TD-002 完成 ✅ — Playwright E2E + critical-path.spec.ts |
+| 2026-06-08 | 新增 TD-011:Backend auth derive hook 撞不存在 UUID throw 500(security bug)|
