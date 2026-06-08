@@ -5,3 +5,7 @@ dist/
 .pglite/
 DEPLOY.md
 *.png
+!docs/screenshots/*.png
+docs/_html/
+docs/_meta/
+docs/*-user-manual.html
