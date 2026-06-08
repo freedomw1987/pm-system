@@ -172,8 +172,21 @@ export const bugApi = {
 
 // WorkLog API
 export const workLogApi = {
-  list: (params?: { userId?: string; taskId?: string; bugId?: string; projectId?: string; startDate?: string; endDate?: string; groupBy?: string }) =>
-    api.get('/worklogs', { params }),
+  list: (params?: {
+    userId?: string
+    taskId?: string
+    bugId?: string
+    projectId?: string
+    startDate?: string
+    endDate?: string
+    groupBy?: string
+    /** 1-based page number (default 1). Ignored when `limit` is set. */
+    page?: number
+    /** Rows per page (default 50, max 200). Ignored when `limit` is set. */
+    pageSize?: number
+    /** Set to a positive int to cap returned rows (Excel export uses -1 for "all"). */
+    limit?: number
+  }) => api.get('/worklogs', { params }),
   create: (data: { taskId?: string; bugId?: string; hours: number; workDate: string; note?: string }) =>
     api.post('/worklogs', data),
   update: (id: string, data: { hours?: number; workDate?: string; note?: string }) =>

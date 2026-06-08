@@ -244,7 +244,38 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
       }
     }
 
-    // Regular list mode
+    // Regular list mode (with optional pagination)
+    // Query params:
+    //   page      — 1-based page number (default 1). Ignored when `limit=-1`.
+    //   pageSize  — rows per page (default 50, max 200)
+    //   limit     — when set to a positive int, returns up to that many rows starting at the top
+    //               (used by Excel export). `limit=-1` means "no limit, return everything".
+    //               When `limit` is set, `page`/`pageSize` are ignored.
+    const DEFAULT_PAGE_SIZE = 50
+    const MAX_PAGE_SIZE = 200
+    const rawLimit = query.limit !== undefined ? parseInt(String(query.limit)) : NaN
+    const wantsAll = !Number.isNaN(rawLimit) && rawLimit === -1
+    const hasExplicitLimit = !Number.isNaN(rawLimit) && rawLimit > 0
+
+    const pageSize = Math.min(
+      Math.max(parseInt(String(query.pageSize ?? DEFAULT_PAGE_SIZE)) || DEFAULT_PAGE_SIZE, 1),
+      MAX_PAGE_SIZE
+    )
+    const page = Math.max(parseInt(String(query.page ?? 1)) || 1, 1)
+    const skip = wantsAll ? 0 : hasExplicitLimit ? 0 : (page - 1) * pageSize
+    const take = wantsAll ? undefined : hasExplicitLimit ? rawLimit : pageSize
+
+    // Server-side aggregate for stats cards (always full filtered set, NOT paged)
+    // This is the source of truth for the UI summary + Excel totals.
+    const aggregateWhere = { ...where }
+    const aggregate = await prisma.workLog.aggregate({
+      where: aggregateWhere,
+      _sum: { hours: true },
+      _count: { _all: true }
+    })
+    const totalCount = aggregate._count._all
+    const totalHours = Number(aggregate._sum.hours || 0)
+
     const workLogs = await prisma.workLog.findMany({
       where,
       include: {
@@ -252,10 +283,21 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
         task: { select: { id: true, title: true, project: { select: { id: true, name: true } } } },
         bug: { select: { id: true, title: true, project: { select: { id: true, name: true } } } }
       },
-      orderBy: { date: 'desc' }
+      orderBy: { date: 'desc' },
+      ...(skip ? { skip } : {}),
+      ...(take !== undefined ? { take } : {})
     })
 
-    return { workLogs: workLogs.map(serializeWorkLog) }
+    return {
+      workLogs: workLogs.map(serializeWorkLog),
+      // Stats (always over the full filtered set, never paged)
+      totalCount,
+      totalHours: Math.round(totalHours * 100) / 100,
+      // Pagination metadata (only meaningful when paginated)
+      page: wantsAll || hasExplicitLimit ? 1 : page,
+      pageSize: wantsAll ? totalCount : hasExplicitLimit ? rawLimit : pageSize,
+      totalPages: wantsAll || hasExplicitLimit ? 1 : Math.max(Math.ceil(totalCount / pageSize), 1)
+    }
   })
   // Create work log
   .post('/', async ({ body, set, user }) => {

@@ -39,6 +39,13 @@ export default function WorkLogsPage() {
   const [users, setUsers] = useState<{ id: string; name: string; departmentId?: string }[]>([])
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [filteredLogs, setFilteredLogs] = useState<WorkLog[]>([])
+  // Server-side stats (source of truth, ignore client-side filters for these)
+  const [serverTotalCount, setServerTotalCount] = useState(0)
+  const [serverTotalHours, setServerTotalHours] = useState(0)
+  // Pagination state (list mode only; ignored when groupBy is active)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalPages, setTotalPages] = useState(1)
   const [formData, setFormData] = useState({
     projectId: '',
     taskId: '',
@@ -118,6 +125,11 @@ export default function WorkLogsPage() {
       if (filterStartDate) params.startDate = filterStartDate
       if (filterEndDate) params.endDate = filterEndDate
       if (groupBy) params.groupBy = groupBy
+      // List mode: pass pagination (ignored by server when groupBy is set)
+      if (!groupBy) {
+        params.page = currentPage
+        params.pageSize = pageSize
+      }
 
       const res = await workLogApi.list(params)
 
@@ -127,12 +139,19 @@ export default function WorkLogsPage() {
         setGrandTotal(res.data.grandTotal || 0)
         setTotalRecords(res.data.totalRecords || 0)
         setWorkLogs([])
+        // Group mode resets pagination state
+        setServerTotalCount(res.data.totalRecords || 0)
+        setServerTotalHours(res.data.grandTotal || 0)
+        setTotalPages(1)
       } else {
-        // Regular list mode
+        // Regular list mode — server returns {workLogs, totalCount, totalHours, page, pageSize, totalPages}
         setWorkLogs(res.data.workLogs || [])
         setGroupedData([])
         setGrandTotal(0)
         setTotalRecords(0)
+        setServerTotalCount(res.data.totalCount ?? (res.data.workLogs?.length ?? 0))
+        setServerTotalHours(res.data.totalHours ?? 0)
+        if (typeof res.data.totalPages === 'number') setTotalPages(res.data.totalPages)
       }
     } catch (err) {
       console.error('Failed to load data:', err)
@@ -141,9 +160,14 @@ export default function WorkLogsPage() {
     }
   }
 
-  // Reload when filters or groupBy changes
+  // Reload when filters, groupBy, page, or pageSize changes
   useEffect(() => {
     loadData()
+  }, [filterProject, filterUser, filterDepartment, filterStartDate, filterEndDate, groupBy, currentPage, pageSize])
+
+  // Reset to page 1 whenever a filter or groupBy changes (page itself should not trigger this)
+  useEffect(() => {
+    setCurrentPage(1)
   }, [filterProject, filterUser, filterDepartment, filterStartDate, filterEndDate, groupBy])
 
   // Apply client-side filters for list mode (fallback when backend filtering not available)
@@ -263,21 +287,38 @@ export default function WorkLogsPage() {
     }
   }
 
-  const exportExcel = () => {
-    const data = filteredLogs.map(log => ({
-      '日期': new Date(log.workDate).toLocaleDateString('zh-TW'),
-      '項目': log.task?.project?.name || log.bug?.project?.name || '-',
-      '類型': log.task ? '任務' : log.bug ? '缺陷' : '-',
-      '任務/缺陷': log.task?.title || log.bug?.title || '-',
-      '部門': (log.user as any)?.department?.name || '-',
-      '人員': log.user?.name || '-',
-      '時數': log.hours,
-      '備註': log.note || ''
-    }))
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, '工作時數')
-    XLSX.writeFile(wb, `工作時數_${new Date().toISOString().split('T')[0]}.xlsx`)
+  const exportExcel = async () => {
+    try {
+      // Always export the FULL filtered set (same filter context as the list),
+      // independent of the current page. Use `limit: -1` to bypass server pagination.
+      const params: any = { limit: -1 }
+      if (filterProject) params.projectId = filterProject
+      if (filterUser) params.userId = filterUser
+      if (filterDepartment) params.departmentId = filterDepartment
+      if (filterStartDate) params.startDate = filterStartDate
+      if (filterEndDate) params.endDate = filterEndDate
+
+      const res = await workLogApi.list(params)
+      const allLogs: WorkLog[] = res.data.workLogs || []
+
+      const data = allLogs.map(log => ({
+        '日期': new Date(log.workDate).toLocaleDateString('zh-TW'),
+        '項目': log.task?.project?.name || log.bug?.project?.name || '-',
+        '類型': log.task ? '任務' : log.bug ? '缺陷' : '-',
+        '任務/缺陷': log.task?.title || log.bug?.title || '-',
+        '部門': (log.user as any)?.department?.name || '-',
+        '人員': log.user?.name || '-',
+        '時數': log.hours,
+        '備註': log.note || ''
+      }))
+      const ws = XLSX.utils.json_to_sheet(data)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, '工作時數')
+      XLSX.writeFile(wb, `工作時數_${new Date().toISOString().split('T')[0]}.xlsx`)
+    } catch (err) {
+      console.error('Failed to export Excel:', err)
+      alert('導出失敗，請重試')
+    }
   }
 
   return (
@@ -362,9 +403,9 @@ export default function WorkLogsPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">
-                    {filteredLogs.reduce((sum, log) => sum + (Number(log.hours) || 0), 0).toFixed(1)}h
+                    {serverTotalHours.toFixed(1)}h
                   </p>
-                  <p className="text-gray-500 text-sm">總計時數</p>
+                  <p className="text-gray-500 text-sm">總計時數（全部記錄）</p>
                 </div>
               </div>
             </div>
@@ -374,8 +415,8 @@ export default function WorkLogsPage() {
                   <Calendar className="text-green-600" size={20} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{filteredLogs.length}</p>
-                  <p className="text-gray-500 text-sm">記錄筆數</p>
+                  <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">{serverTotalCount}</p>
+                  <p className="text-gray-500 text-sm">記錄筆數（全部）</p>
                 </div>
               </div>
             </div>
@@ -386,8 +427,8 @@ export default function WorkLogsPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-xl lg:text-2xl font-bold text-gray-900 truncate">
-                    {filteredLogs.length > 0
-                      ? (filteredLogs.reduce((sum, log) => sum + (Number(log.hours) || 0), 0) / filteredLogs.length).toFixed(1)
+                    {serverTotalCount > 0
+                      ? (serverTotalHours / serverTotalCount).toFixed(1)
                       : 0}h
                   </p>
                   <p className="text-gray-500 text-sm">平均時數</p>
@@ -732,6 +773,67 @@ export default function WorkLogsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Pagination controls (list mode only) */}
+      {!groupBy && !isLoading && workLogs.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 px-1">
+          <div className="text-sm text-gray-500">
+            第 <span className="font-medium text-gray-900">{(currentPage - 1) * pageSize + 1}</span>–<span className="font-medium text-gray-900">{Math.min(currentPage * pageSize, serverTotalCount)}</span> 筆，共 <span className="font-medium text-gray-900">{serverTotalCount}</span> 筆
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="text-sm text-gray-500">每頁</label>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(parseInt(e.target.value))}
+              className="input-field text-sm py-1 w-auto"
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+            <div className="flex items-center gap-1 ml-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage <= 1}
+                className="px-2 py-1 text-sm rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="首頁"
+              >
+                «
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="px-3 py-1 text-sm rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                上一頁
+              </button>
+              <span className="px-3 py-1 text-sm text-gray-700">
+                第 <span className="font-medium text-gray-900">{currentPage}</span> / {totalPages} 頁
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-3 py-1 text-sm rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                下一頁
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage >= totalPages}
+                className="px-2 py-1 text-sm rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="尾頁"
+              >
+                »
+              </button>
+            </div>
           </div>
         </div>
       )}
