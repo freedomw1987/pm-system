@@ -105,6 +105,32 @@
 - **業務影響**: Low — 目前 traffic 低
 - **建議**: P2,scale 到 50+ 用戶才需要
 
+### 🟡 TD-012: Host 跑 `bun test` 撞 `tasks.test.ts` fail(環境問題,非 code)
+
+- **發現日期**: 2026-06-08(Sprint 1 retro 2026-06-08 ACT-10)
+- **發現來源**: Sprint 1 retro 文件,David 2026-06-08 QA review 時觸發
+- **症狀**: `cd backend && bun test` host 跑出 `42 pass / 1 fail / 1 err` —
+  `Cannot find module '.prisma/client/default' from '.../node_modules/@prisma/client/default.js'`
+- **根因**: Host `bun install` 唔跑 `prisma generate`,所以
+  `node_modules/.prisma/client/default.js` 缺失。Docker container 內 Dockerfile
+  `bun install --production` 後有 `bunx prisma generate`,所以 docker 內 3 個
+  `tasks.test.ts` cases 照跑全綠
+- **影響**:
+  - 🟡 **本地 dev friction** — 新 onboard 同事 / CI 跑 host test 會撞 fail
+  - 🟢 **唔影響 ship** — Docker 內 full test 套件 45+13 全綠
+  - 🟢 **唔影響 production** — runtime client 由 image bake 步驟 generate 好
+- **修復成本**: 0.01 日(2 行 `package.json` 改動)
+- **業務影響**: Low — 純 DX 問題
+- **建議**: P2(本來 retro 列 ACT-10,屬環境 polishing)
+- **2026-06-08 進展**: ✅ **已修** — `backend/package.json` 加 `"test": "bun test"` +
+  `"pretest": "bunx prisma generate"` hook,host 跑 `bun run test` 即自動
+  generate client → 45 pass / 0 fail(commit `03f59c2`)。Docker 內行為不變
+  (entrypoint 已經行緊 generate)。
+- **守到**:
+  - `cd backend && bun run test` → 45 pass / 0 fail / 80 expect() calls [750ms]
+  - `docker compose exec backend bun test` → 45 pass / 0 fail
+  - `cd e2e && npx playwright test` → 13/13 E2E pass
+
 ---
 
 ## 從 commit 看到嘅「快速 fix」
@@ -124,14 +150,15 @@
 
 ## 行動計劃
 
-### Sprint 1 (P0)
-- [ ] TD-001: 補 RBAC + Agent test
-- [ ] TD-002: E2E framework + 1 條 critical path
+### Sprint 1 (P0) — ✅ DONE
+- [x] TD-001: 補 RBAC + Agent test — 3 份 test 寫咗(coverage 5%→25%)
+- [x] TD-002: E2E framework + 1 條 critical path — Playwright 13/13 pass
 
 ### Sprint 2 (P1)
 - [ ] TD-003: Dockerfile 優化
 - [ ] TD-004: RBAC consolidate
 - [ ] TD-008: Rate limiting
+- [ ] TD-012: host test env(其實已修 ✅,放呢度做 reference)
 
 ### Backlog (P2)
 - [ ] TD-005, TD-006, TD-007, TD-009, TD-010
@@ -145,5 +172,8 @@
 | 2026-06-08 | 初版 10 個 debt entry |
 | 2026-06-08 | TD-001 進展:3 份新 test,3 P0 US 升至 PASS-UNIT |
 | 2026-06-08 | TD-002 完成 ✅ — Playwright E2E + critical-path.spec.ts |
-| 2026-06-08 | 新增 TD-011:Backend auth derive hook 撞不存在 UUID throw 500(security bug)|
+| 2026-06-08 | 新增 TD-011:Backend auth derive hook 撞不存在 UUID throw 500(security bug) |
 | 2026-06-08 | TD-011 完成 ✅ — derive hook 加 user existence check + 改用 dbUser.role,E2E 500→403 |
+| 2026-06-08 | 新增 TD-012:host `bun test` 撞 `.prisma/client/default` 缺失 |
+| 2026-06-08 | TD-012 完成 ✅ — `package.json` 加 `pretest: bunx prisma generate`,host 45/45 pass(commit `03f59c2`) |
+| 2026-06-08 | Sprint 1 行動計劃 tick 完:TD-001 ✅ + TD-002 ✅ |
