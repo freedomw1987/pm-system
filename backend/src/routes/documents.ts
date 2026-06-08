@@ -3,7 +3,7 @@ import { prisma } from '../utils/prisma'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as mammoth from 'mammoth'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { $ } from 'bun'
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -158,17 +158,39 @@ async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
   }
 
   if (ext === '.xlsx') {
-    const workbook = XLSX.read(fileInfo.buffer, { type: 'buffer' })
+    // exceljs replaces xlsx (TD-012: xlsx 0.18.5 has Prototype Pollution + ReDoS CVEs)
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(fileInfo.buffer)
     const sheetTexts: string[] = []
 
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName]
-      if (!sheet) continue
-      const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false })
-      if (csv.trim()) {
-        sheetTexts.push(`## Sheet: ${sheetName}\n${csv.trim()}`)
+    workbook.eachSheet((worksheet, sheetId) => {
+      const rows: string[] = []
+      worksheet.eachRow({ includeEmpty: false }, (row) => {
+        const cells: string[] = []
+        row.eachCell({ includeEmpty: false }, (cell) => {
+          // Cast cell values to string for uniform CSV output
+          const v = cell.value
+          let text: string
+          if (v === null || v === undefined) {
+            text = ''
+          } else if (typeof v === 'object') {
+            // exceljs formula/rich-text/complex objects → string
+            text = String((v as any).result ?? (v as any).text ?? (v as any).richText?.map((r: any) => r.text).join('') ?? '')
+          } else {
+            text = String(v)
+          }
+          // Escape CSV: wrap in quotes if contains comma/quote/newline
+          if (/[",\n]/.test(text)) {
+            text = `"${text.replace(/"/g, '""')}"`
+          }
+          cells.push(text)
+        })
+        if (cells.length > 0) rows.push(cells.join(','))
+      })
+      if (rows.length > 0) {
+        sheetTexts.push(`## Sheet: ${worksheet.name} (id=${sheetId})\n${rows.join('\n')}`)
       }
-    }
+    })
 
     return sheetTexts.join('\n\n')
   }

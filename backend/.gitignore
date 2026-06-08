@@ -1,5 +1,6 @@
 # dependencies (bun install)
 node_modules
+package-lock.json  # bun project — use bun.lock, not npm lockfile
 
 # output
 out

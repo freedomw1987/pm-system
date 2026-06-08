@@ -3,7 +3,7 @@ import { Clock, Plus, Calendar, Edit2, Trash2, X, Check, Download, BarChart3, Us
 import { useAuth } from '../context/AuthContext'
 import { workLogApi, projectApi, taskApi, bugApi, userApi, departmentApi } from '../utils/api'
 import type { WorkLog } from '../types'
-import * as XLSX from 'xlsx'
+import * as ExcelJS from 'exceljs'
 import { hasAnyPermission, hasPermission } from '../utils/permissions'
 
 interface ProjectOption { id: string; name: string }
@@ -311,10 +311,27 @@ export default function WorkLogsPage() {
         '時數': log.hours,
         '備註': log.note || ''
       }))
-      const ws = XLSX.utils.json_to_sheet(data)
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, '工作時數')
-      XLSX.writeFile(wb, `工作時數_${new Date().toISOString().split('T')[0]}.xlsx`)
+      const ws = new ExcelJS.Workbook()
+      const sheet = ws.addWorksheet('工作時數')
+      sheet.columns = [
+        { header: '日期', key: '日期', width: 14 },
+        { header: '項目', key: '項目', width: 20 },
+        { header: '類型', key: '類型', width: 8 },
+        { header: '任務/缺陷', key: '任務/缺陷', width: 24 },
+        { header: '部門', key: '部門', width: 14 },
+        { header: '人員', key: '人員', width: 14 },
+        { header: '時數', key: '時數', width: 8 },
+        { header: '備註', key: '備註', width: 30 }
+      ]
+      data.forEach(row => sheet.addRow(row))
+      const buf = await ws.xlsx.writeBuffer()
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `工作時數_${new Date().toISOString().split('T')[0]}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Failed to export Excel:', err)
       alert('導出失敗，請重試')
@@ -384,10 +401,23 @@ export default function WorkLogsPage() {
                   '時數': g.totalHours,
                   '筆數': g.count
                 }))
-                const ws = XLSX.utils.json_to_sheet(exportData)
-                const wb = XLSX.utils.book_new()
-                XLSX.utils.book_append_sheet(wb, ws, `分組_${groupBy}`)
-                XLSX.writeFile(wb, `工作時數_${groupBy}_${new Date().toISOString().split('T')[0]}.xlsx`)
+                const ws2 = new ExcelJS.Workbook()
+                const sheet2 = ws2.addWorksheet(`分組_${groupBy}`)
+                sheet2.columns = [
+                  { header: '分組', key: '分組', width: 20 },
+                  { header: '部門', key: '部門', width: 14 },
+                  { header: '時數', key: '時數', width: 8 },
+                  { header: '筆數', key: '筆數', width: 8 }
+                ]
+                exportData.forEach(row => sheet2.addRow(row))
+                const buf = await ws2.xlsx.writeBuffer()
+                const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `工作時數_${groupBy}_${new Date().toISOString().split('T')[0]}.xlsx`
+                a.click()
+                URL.revokeObjectURL(url)
               }} className="btn-secondary w-full flex items-center justify-center gap-2">
                 <Download size={20} />
                 <span>導出分組</span>
