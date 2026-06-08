@@ -40,7 +40,7 @@
 | US-5.3 | MyBugs | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.4 | 改狀態 | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | **Epic 6: WorkLogs** | | | | | | |
-| US-6.1 | 填工時 | ❌ | ❌ | ✅ critical-path | **PASS-E2E** 🟢 | TBD |
+| US-6.1 | 填工時 | ✅ worklogs-create.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 5: 27 tests — serializeWorkLog + formatDateKey + getWeekKey + validateWorkLogCreateInput + 5號 lock) | TBD |
 | US-6.2 | 分頁列表 | ✅ worklogs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-6.3 | Excel 匯出 | ✅ worklogs.test.ts (limit=-1) | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-6.4 | 部門/用戶篩選 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -48,7 +48,7 @@
 | US-7.1 | 自定義角色 | ✅ roles.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢🔴 | TBD |
 | US-7.2 | 改用戶角色 | ✅ roles.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢🔴 | TBD |
 | US-7.3 | middleware 擋 | ✅ permission.test.ts | ❌ | ✅ rbac-negative | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
-| US-7.4 | 項目層覆寫 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-7.4 | 項目層覆寫 | ✅ project-permission-override.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 5: 26 tests — canCreate/Edit/DeleteInProject + cross-route invariant) | TBD |
 | **Epic 8: AI Chat** | | | | | | |
 | **US-8.1** | 自然語言查詢 | ✅ chat-integration.test.ts | ❌ | ❌ | **PASS-INT** 🟢 (Sprint 3: 22 tests — 4 SSE pure helpers + 18 integration with mocked fetch) | TBD |
 | **US-8.2** | 綁定項目 | ✅ chat-integration.test.ts | ❌ | ❌ | **PASS-INT** 🟢 (同 US-8.1 共享 streamLLMResponse) | TBD |
@@ -61,8 +61,8 @@
 | US-9.1 | 建 Agent | ✅ agents-create.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢🔴 | TBD |
 | US-9.2 | 認領 task | ✅ agents.test.ts + agents-claim.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | **US-9.3** | WebSocket | ✅ runtime-ws-integration.test.ts | ❌ | ✅ llm-ws-e2e.spec.ts | **PASS-INT + PASS-E2E** 🟢🟢 (17 backend tests derive helper + 4 Playwright 真 wire test) | TBD |
-| US-9.4 | Monitor | ❌ | ❌ | ❌ | NONE | TBD |
-| US-9.5 | Token 統計 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-9.4 | Monitor | ✅ agent-monitor.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 5: 17 tests — agentSessions + state machine + intervene/pause/resume + getAgentTaskLogs) | TBD |
+| US-9.5 | Token 統計 | ✅ tokenlogs-stats.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 5: 28 tests — filterTokenLogs + summarizeTokenLogs + groupByModel + groupByAgent + RBAC gates) | TBD |
 | **Epic 10: Wiki** | | | | | | |
 | US-10.1 | 建頁 | ✅ wikis.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-10.2 | 編輯 | ✅ wikis.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
@@ -81,27 +81,26 @@
 
 ## 2. 健康指標
 
-| 指標 | 數值 (2026-06-08 Sprint 3 結算) |
+| 指標 | 數值 (2026-06-09 Sprint 5 結算) |
 |------|------|
 | US 總數 | 50+ |
-| P0 US 過 test | **26/29 (90%)** 🟢 (Sprint 2: 23/29 = 79%) |
-| P0 US 三層 PASS-UNIT + PASS-E2E | **6** (US-1.1, 2.1, 3.1, 4.1, 7.3, 9.3) |
-| P0 US PASS-UNIT only | **19** (US-1.2, 1.3, 2.2, 3.2, 3.3, 3.4, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.2, 6.3, 7.1, 7.2, 8.1, 8.2, 8.7, 9.1, 9.2) |
-| P0 US PASS-INT only (新) | **3** (US-8.1, 8.2, 9.3 — Sprint 3 closure) |
-| P0 US PASS-E2E only | **1** (US-6.1 缺 unit, 將來補) |
+| P0 US 過 test | **29/29 (100%)** 🟢 (Sprint 3: 26/29 = 90%) |
+| P0 US 三層 PASS-UNIT + PASS-E2E | **7** (US-1.1, 2.1, 3.1, 4.1, 6.1, 7.3, 9.3) |
+| P0 US PASS-UNIT only | **21** (US-1.2, 1.3, 2.2, 3.2, 3.3, 3.4, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.2, 6.3, 7.1, 7.2, 7.4, 8.1, 8.2, 8.7, 9.1, 9.2, 9.4, 9.5) |
+| P0 US PASS-INT only | **3** (US-8.1, 8.2, 9.3 — Sprint 3 closure) |
 | P0 US DEFERRED | **0** 🟢 (Sprint 2: 3, Sprint 3 closure ✅) |
-| P0 US NONE | **3** (US-9.4, 9.5, 7.4 仍 0 test) |
+| P0 US NONE | **0** 🟢 (Sprint 3: 3, Sprint 5 closure ✅) |
 | P1+ US | 大部分 NONE (low priority) |
-| Unit tests 總數 | **372 pass** (Sprint 2: 333) |
-| E2E tests | 17 pass (Sprint 2: 13) |
+| Unit tests 總數 | **479 pass** (Sprint 4: 381) |
+| E2E tests | 17 pass (Sprint 3: 17) |
 | FLAKY | 0 |
-| **Coverage %** | **~90% P0 US** (Sprint 2: 79%) |
+| **Coverage %** | **100% P0 US** (Sprint 3: 90%) |
 
-🟢🟢 **6 個 P0 US 雙綠**(Sprint 2: 1 個)。Sprint 3 推 1 → 6。
-🟢 **19 個 P0 US PASS-UNIT**(Sprint 2: 17 個)。Sprint 3 推 17 → 19。
-🟢 **3 個 P0 US PASS-INT**(Sprint 3 新)— US-8.1, 8.2, 9.3 ACT-14/15 closure。
+🟢🟢 **7 個 P0 US 雙綠**(Sprint 3: 6 個)。Sprint 5 推 6 → 7。
+🟢 **21 個 P0 US PASS-UNIT**(Sprint 3: 19 個)。Sprint 5 推 19 → 21。
+🟢 **3 個 P0 US PASS-INT**(US-8.1, 8.2, 9.3 — Sprint 3 closure)。
 🟢 **0 個 DEFERRED**(Sprint 2: 3 個, Sprint 3 全部 close)。
-🟡 **3 個 P0 US 仍 NONE**(US-7.4, 9.4, 9.5)— backfill priority 中等,Sprint 4+ 考慮。
+🟢 **0 個 NONE**(Sprint 3: 3 個, Sprint 5 全部 close — US-6.1, 7.4, 9.4, 9.5)。
 
 ---
 
@@ -145,6 +144,9 @@
 | 2026-06-08 | **Sprint 2 P0 Unit Test Push**:9 份新 test file (auth/projects/requirements/bugs/roles/agents-create/agents-claim/tasks-extended/wikis/llm-config),288 個 unit test,15 個 P0 US 由 NONE/PARTIAL 升至 PASS-UNIT,P0 US coverage 28%→79% |
 | 2026-06-08 | Sprint 2 標記 US-8.1/8.2/9.3 為 DEFERRED(chat.ts 1787 行 + agent/runtime.ts 645 行,unit test 唔啱,改用 integration test approach)— Sprint 3 做 |
 | 2026-06-08 | Sprint 2 關閉 Sprint 1 標 🔴 嘅 US-7.1 + US-9.1 兩個 ship-blocker(0 個 ship-blocker 剩低) |
+| 2026-06-09 | Sprint 4 closure:TD-008 ✅(rate limit + 移除 cache),RG-007 + RG-008 entries,9 個新 unit test |
+| 2026-06-09 | TD-008 進度更新 — 5 個 rate-limit unit test pass,RG-008 regression test 守住 |
+| 2026-06-09 | **Sprint 5 closure**:US-6.1, 7.4, 9.4, 9.5 由 NONE → PASS-UNIT,4 份新 test file(98 個新 test),P0 US coverage 90%→**100%** |
 
 ---
 
