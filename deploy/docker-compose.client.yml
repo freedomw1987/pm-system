@@ -53,7 +53,12 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    command: ["sh", "-c", "bunx prisma migrate deploy && bun prisma/seed.ts && bun src/index.ts"]
+    # 注意: 用 db push 而非 migrate deploy,客戶機 first boot 會 force sync schema
+    # (冇 migration history)。客戶 update v1.0.1 時, 新 image 嘅 schema 同 DB schema diff
+    # 可能 silently drop column → data loss。客戶 update 前必須 backup DB。
+    # 若要改返 migrate deploy, 改呢行得: `bunx prisma migrate deploy && bun src/index.ts`
+    # (但咁要 image 入面保留完整 prisma/migrations/ folder)
+    command: ["sh", "-c", "bunx prisma db push && bunx prisma db seed && bun src/index.ts"]
     logging:
       driver: json-file
       options:
