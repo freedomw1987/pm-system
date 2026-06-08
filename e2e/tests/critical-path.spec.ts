@@ -12,17 +12,16 @@
  */
 
 import { test, expect, type Page } from '@playwright/test'
+import { loginAs } from './_helpers'
+
+// RG-012: helper 自動 inject `X-Forwarded-For` header,防 backend rate limit 撞。
 
 const ADMIN = { email: 'admin@test.com', password: 'admin123' }
 
-/** 用 API 登入 + 攞 access token(直接走 backend,避免 UI login 慢) */
-async function apiLogin(page: Page): Promise<string> {
-  const res = await page.request.post('http://localhost:4001/auth/login', {
-    data: ADMIN,
-  })
-  expect(res.status()).toBe(200)
-  const body = await res.json()
-  return body.accessToken as string
+/** 用 API 登入 + 攞 access token(直接走 backend,避免 UI login 慢)。
+ *  帶 testInfo 做 IP isolation(RG-012) */
+async function apiLogin(req: Page['request'], testTitle: string): Promise<string> {
+  return loginAs(req, 'admin', testTitle)
 }
 
 /** 清掉同 test 同名嘅 project,保持 DB clean(避免累積) */
@@ -49,9 +48,9 @@ test.describe('Critical path: project → requirement → task → worklog', () 
   const requirementTitle = `E2E Req ${suffix}`
   const taskTitle = `E2E Task ${suffix}`
 
-  test('happy path works end-to-end', async ({ page }) => {
+  test('happy path works end-to-end', async ({ page }, testInfo) => {
     // 1. API login + 攞 token
-    const token = await apiLogin(page)
+    const token = await apiLogin(page.request, testInfo.title)
     expect(token).toBeTruthy()
     expect(token).toContain(':admin') // format: userId:role
 

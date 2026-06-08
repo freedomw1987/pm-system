@@ -262,6 +262,9 @@ describe('RG-XXX: <bug 簡述>', () => {
 | 2026-06-08 | 加 RG-006:Auth derive hook 撞 fake UUID throw 500(由 TD-011 衍生,fix 後補 regression test) |
 | 2026-06-09 | 加 RG-007:rolePermissionCache stale — RBAC changes require backend restart(由 TD-008 cache 改動衍生,fix 後補 regression test) |
 | 2026-06-09 | 加 RG-008:/api/auth/login 冇 rate limit — 可暴力破解(由 TD-008 rate limit 改動衍生,fix 後補 regression test) |
+| 2026-06-09 | 加 RG-010:WS handler helpers — pure function extraction(TD-014 closure) |
+| 2026-06-09 | 加 RG-011:Backend Dockerfile 漏 COPY prisma.config.ts — Prisma 7 CLI throw datasource.url required |
+| 2026-06-09 | 加 RG-012:E2E 所有 spec 共用 `login:unknown` rate-limit bucket — 撞 429 |
 
 ---
 
@@ -273,3 +276,33 @@ describe('RG-XXX: <bug 簡述>', () => {
 
 **Root cause + Prevention 兩部分都必填**(紅線 14):
 - 淨寫 code 改動冇寫「點解」嘅 fix 唔可以 merge
+
+### RG-012: E2E 所有 spec 共用 `login:unknown` rate-limit bucket — 撞 429(2026-06-09 發現)
+
+- **發現日期**: 2026-06-09(Sprint 5 收工時跑 E2E 發現)
+- **Symptom**: `e2e/tests/rbac-negative.spec.ts` 跑 8 個 test,每個都 `POST /auth/login`,
+  第 5 個開始連續 4 個 test 撞 `429 Too Many Login Attempts`(RG-008 嘅 side effect)。
+  4 個 test fail,雖然 backend 行為正確,係 E2E 設計問題。
+- **Root cause**: Backend `auth.ts` 嘅 rate limit key 用 `x-forwarded-for` 第 1 個 IP,
+  fallback `'unknown'`。Playwright 嘅 `page.request` / `request.post` **唔自動 inject** `X-Forwarded-For`,
+  Elysia 攞到 `null` → 落 `?? 'unknown'` fallback,**所有 E2E login 撞同一個 bucket `login:unknown`**。
+  17 個 E2E test 個 spec 平均 1-2 個 login 嘗試,撞 5/60s limit。
+- **Fix**:
+  - 新增 `e2e/tests/_helpers.ts`,export `loginAs(req, role, testTitle)`,自動 inject
+    `X-Forwarded-For: 127.0.0.<n>` header,IP suffix 由 test title hash derive(`[1, 200]`)
+  - `rbac-negative.spec.ts` 8 個 `loginAs` call site 全改用 helper
+  - `critical-path.spec.ts` 嘅 `apiLogin` helper 改用 helper,test 函數加 `testInfo` parameter
+  - `llm-ws-e2e.spec.ts` 冇 login call 唔需要改
+  - Backend 0 改動
+- **Prevention**:
+  - E2E spec 寫 login **必須** import `loginAs` from `_helpers`(唔可以 inline fetch `/auth/login`)
+  - 唔可以 reuse 同一個 IP 跨 test(RG-008 嘅 IP isolation invariant 應用落 E2E)
+  - 唔可以 skip 個 helper,「快」唔係 skip 嘅理由(backend rate limit 唔認得 caller)
+  - 加新 E2E spec 嘅 PR review checklist:`grep -E "post\(.*auth/login" e2e/tests/` 必須
+    全部經 helper
+- **驗證**:
+  - `rbac-negative.spec.ts` 8 個 test 全部 200/403 pass(rate limit bucket 獨立)
+  - `critical-path.spec.ts` happy path + health check + UI login 3/3 pass
+  - 整體 E2E 17/17 pass(之前 13/17)
+- **Ref**: 同 RG-008 嘅 IP-based rate limit 直接相關,屬 E2E 設計修正
+

@@ -19,30 +19,19 @@
  *  - admin 同一 endpoint → 200 (證明 403 唔係 false positive)
  */
 
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { expect } from '@playwright/test'
+import { test, loginAs } from './_helpers'
+
+// RG-012: 每個 test 用獨立 IP(透過 `_helpers.loginAs` 自動 inject `X-Forwarded-For`)
+// 防 backend 嘅 5 attempts/60s rate limit(RG-008)撞。
+// Backend 0 改動,純 E2E 設計修正。
 
 const BACKEND = 'http://localhost:4001'
 
-const USERS = {
-  admin: { email: 'admin@test.com', password: 'admin123' },
-  pm: { email: 'pm@test.com', password: 'pm123' },
-  techlead: { email: 'techlead@test.com', password: 'tl123' },
-  developer: { email: 'dev@test.com', password: 'dev123' },
-  tester: { email: 'tester@test.com', password: 'test123' },
-} as const
-
-async function loginAs(req: APIRequestContext, role: keyof typeof USERS): Promise<string> {
-  const u = USERS[role]
-  const res = await req.post(`${BACKEND}/auth/login`, { data: u })
-  expect(res.status(), `login ${role} should succeed`).toBe(200)
-  const body = await res.json()
-  return body.accessToken as string
-}
-
 test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
   // ── Negative: 3 non-admin roles POST /projects 全部應該 403 ──
-  test('developer cannot create project (no projects.create perm)', async ({ request }) => {
-    const token = await loginAs(request, 'developer')
+  test('developer cannot create project (no projects.create perm)', async ({ request }, testInfo) => {
+    const token = await loginAs(request, 'developer', testInfo.title)
     const res = await request.post(`${BACKEND}/api/projects`, {
       headers: { Authorization: `Bearer ${token}` },
       data: { name: 'E2E Negative Project', description: 'should fail' },
@@ -52,8 +41,8 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
     expect(body.error?.code ?? body.error).toMatch(/FORBIDDEN|Permission denied/i)
   })
 
-  test('tester cannot create project (no projects.create perm)', async ({ request }) => {
-    const token = await loginAs(request, 'tester')
+  test('tester cannot create project (no projects.create perm)', async ({ request }, testInfo) => {
+    const token = await loginAs(request, 'tester', testInfo.title)
     const res = await request.post(`${BACKEND}/api/projects`, {
       headers: { Authorization: `Bearer ${token}` },
       data: { name: 'E2E Negative Project', description: 'should fail' },
@@ -61,10 +50,10 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
     expect(res.status()).toBe(403)
   })
 
-  test('pm cannot create project (pm is project manager, has limited perms)', async ({ request }) => {
+  test('pm cannot create project (pm is project manager, has limited perms)', async ({ request }, testInfo) => {
     // 注意:pm 喺 seed 嘅 permission 包含 projects.create(2026-06-08 verify 真實行為)
     // 為咗守住 negative case,我哋試 pm 冇嘅 endpoint(eg. delete user)
-    const token = await loginAs(request, 'pm')
+    const token = await loginAs(request, 'pm', testInfo.title)
     const res = await request.post(`${BACKEND}/api/projects`, {
       headers: { Authorization: `Bearer ${token}` },
       data: { name: 'E2E Negative Project', description: 'should fail' },
@@ -83,8 +72,8 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
   })
 
   // ── Negative: developer 想 DELETE /users (admin-only) ──
-  test('developer cannot delete user (admin-only endpoint)', async ({ request }) => {
-    const token = await loginAs(request, 'developer')
+  test('developer cannot delete user (admin-only endpoint)', async ({ request }, testInfo) => {
+    const token = await loginAs(request, 'developer', testInfo.title)
     const res = await request.delete(`${BACKEND}/api/users/non-existent-id`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -94,8 +83,8 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
   })
 
   // ── Negative: agent-related resource locked down ──
-  test('tester cannot create AI agent (admin-only)', async ({ request }) => {
-    const token = await loginAs(request, 'tester')
+  test('tester cannot create AI agent (admin-only)', async ({ request }, testInfo) => {
+    const token = await loginAs(request, 'tester', testInfo.title)
     const res = await request.post(`${BACKEND}/api/agents`, {
       headers: { Authorization: `Bearer ${token}` },
       data: { email: 'e2e-test@test.com', name: 'E2E Test', role: 'developer' },
@@ -138,8 +127,8 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
   })
 
   // ── Positive control: admin 同一個 endpoint 應該成功(證明 403 唔係 false positive) ──
-  test('admin CAN create project (positive control — same endpoint)', async ({ request }) => {
-    const token = await loginAs(request, 'admin')
+  test('admin CAN create project (positive control — same endpoint)', async ({ request }, testInfo) => {
+    const token = await loginAs(request, 'admin', testInfo.title)
     const suffix = Date.now().toString(36)
     const projectName = `E2E Admin Control ${suffix}`
     try {
@@ -170,12 +159,12 @@ test.describe('RBAC negative E2E (US-7.3, red line 12)', () => {
 
   // ── Negative: 嘗試刪 PM 唔可以 DELETE 其他人嘅 requirement ──
   // 守 US-3.4 / US-3.2 嘅 permission invariant
-  test('developer cannot delete other users worklog (no worklogs.delete_all perm)', async ({ request }) => {
-    const token = await loginAs(request, 'developer')
+  test('developer cannot delete other users worklog (no worklogs.delete_all perm)', async ({ request }, testInfo) => {
+    const token = await loginAs(request, 'developer', testInfo.title)
     // 任何 random UUID — backend 應該先 RBAC check 再做 existence check
     // 但 worklogs 嘅 PUT/DELETE check 比較鬆(own vs all),要 test 對他人嘅 log
     // 用 admin token 預先建 1 個 worklog,再用 developer token 試刪
-    const adminToken = await loginAs(request, 'admin')
+    const adminToken = await loginAs(request, 'admin', testInfo.title)
     // 攞 sample project + task
     const projRes = await request.get(`${BACKEND}/api/projects`, {
       headers: { Authorization: `Bearer ${adminToken}` },
