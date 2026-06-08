@@ -13,8 +13,15 @@
 | Backend Integration | 0 | 0 | — |
 | Frontend Unit (`frontend/src/**/*.test.ts`) | 1 | 1 | `utils/authRefresh.test.ts` |
 | Frontend Component | 0 | 0 | — |
-| E2E (Playwright / Cypress) | 0 | 0 | — |
-| **Total** | **5** | **~47** | **~25% coverage (rough estimate)** |
+| E2E (Playwright / Cypress) | 1 | 3 | critical path + login + health check |
+| **Total** | **6** | **~50** | **~30% coverage (rough estimate)** |
+
+### E2E test files (1)
+
+5. `e2e/tests/critical-path.spec.ts` — **3 tests**(2026-06-08 加)
+   - 完整 happy path:login → 建項目 → 建需求 → 建任務 → 填工時
+   - health check:frontend + backend 都 reachable
+   - UI login flow:form submit → redirect 去 `/`
 
 ### Backend test files (4)
 
@@ -91,10 +98,10 @@
 
 | 指標 | 目標 | 當前 | 狀態 |
 |------|------|------|------|
-| Backend route test coverage | > 80% | ~5% | 🔴 |
-| Frontend critical path test | > 50% | ~3% | 🔴 |
-| E2E critical paths | 至少 3 條 | 0 | 🔴 |
-| Regression test for fixed bugs | 100% (RG-XXX) | 0% | 🔴 |
+| Backend route test coverage | > 80% | ~25% | 🟡 |
+| Frontend critical path test | > 50% | ~10% | 🔴 |
+| E2E critical paths | 至少 3 條 | **3** | 🟢 |
+| Regression test for fixed bugs | 100% (RG-XXX) | 40% (1/5) | 🟡 |
 | 整體 % (lines covered) | > 70% | unknown(未跑 nyc/c8) | 🔴 |
 
 ---
@@ -135,3 +142,5 @@
 | 日期 | 變更 |
 |------|------|
 | 2026-06-08 | 初版 inventory |
+| 2026-06-08 | Sprint 1 補 unit test (3 份,42 tests) |
+| 2026-06-08 | Sprint 1 補 E2E (1 份,3 tests) — Playwright + critical path |

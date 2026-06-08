@@ -14,22 +14,22 @@
 | US | Priority | Backend Test | Frontend Test | E2E Test | Test Status | Owner |
 |----|----------|--------------|---------------|----------|-------------|-------|
 | **Epic 1: Auth** | | | | | | |
-| US-1.1 login | P0 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-1.1 login | P0 | ❌ | ❌ | ✅ critical-path | **PARTIAL → PASS-E2E** 🟢 | TBD |
 | US-1.2 refresh | P0 | ❌ | ✅ authRefresh.test.ts | ❌ | PARTIAL | TBD |
 | US-1.3 logout | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 2: Projects** | | | | | | |
-| US-2.1 建項目 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-2.1 建項目 | P0 | ❌ | ❌ | ✅ critical-path | **PARTIAL → PASS-E2E** 🟢 | TBD |
 | US-2.2 加成員 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-2.3 dashboard | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-2.4 部門 link | P2 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 3: Requirements** | | | | | | |
-| US-3.1 建需求 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-3.1 建需求 | P0 | ❌ | ❌ | ✅ critical-path | **PARTIAL → PASS-E2E** 🟢 | TBD |
 | US-3.2 分派 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-3.3 MyRequirements | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-3.4 改狀態 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-3.5 富文本 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 4: Tasks** | | | | | | |
-| US-4.1 建任務 | P0 | ✅ tasks.test.ts | ❌ | ❌ | PARTIAL | TBD |
+| US-4.1 建任務 | P0 | ✅ tasks.test.ts | ❌ | ✅ critical-path | **PARTIAL → PASS** 🟢 | TBD |
 | US-4.2 MyTasks | P0 | ✅ tasks.test.ts | ❌ | ❌ | PARTIAL | TBD |
 | US-4.3 Kanban 改狀態 | P0 | ✅ tasks.test.ts | ❌ | ❌ | PARTIAL | TBD |
 | US-4.4 需求↔任務 link | P1 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -40,7 +40,7 @@
 | US-5.3 MyBugs | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | US-5.4 改狀態 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 6: WorkLogs** | | | | | | |
-| US-6.1 填工時 | P0 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-6.1 填工時 | P0 | ❌ | ❌ | ✅ critical-path | **PARTIAL → PASS-E2E** 🟢 | TBD |
 | US-6.2 分頁列表 | P0 | ✅ worklogs.test.ts | ❌ | ❌ | **PARTIAL → PASS-UNIT** | TBD |
 | US-6.3 Excel 匯出 | P1 | ✅ worklogs.test.ts (limit=-1) | ❌ | ❌ | **PARTIAL** | TBD |
 | US-6.4 部門/用戶篩選 | P1 | ❌ | ❌ | ❌ | NONE | TBD |
@@ -84,15 +84,16 @@
 | 指標 | 數值 (2026-06-08 更新) |
 |------|------|
 | US 總數 | 50+ |
-| NONE (0 test) | ~44 |
-| PARTIAL | 3 |
-| PASS-UNIT (新 P0 US 過 test) | 3 (US-6.2 / 6.3 / 7.3 / 9.2) |
+| NONE (0 test) | ~40 |
+| PARTIAL | 2 |
+| PASS-UNIT | 3 (US-6.2 / 7.3 / 9.2) |
+| PASS-E2E | 5 (US-1.1 / 2.1 / 3.1 / 4.1 / 6.1) |
 | FLAKY | 0 |
-| **Coverage %** | **~25%** (估,純 unit) |
+| **Coverage %** | **~30%** (估) |
 
-🟢 **3 個 P0 US 升至 PASS-UNIT**: US-7.3 (RBAC), US-9.2 (Agent claim), US-6.2 (WorkLog 分頁)。
+🟢 **8 個 P0 US 過 test**(US-1.1 / 2.1 / 3.1 / 4.1 / 6.1 / 6.2 / 7.3 / 9.2)。E2E 守住 happy path,符合紅線 17 smoke test 要求。
 
-🔴 **仍然 ship blocker**: E2E test 0 個(紅線 17),其他 P0 US 仲要補。
+🔴 **仍然 ship blocker**: Frontend component test 0 個,其他 P0 US 仲要補。
 
 ---
 
@@ -117,6 +118,7 @@
 |------|------|
 | 2026-06-08 | 初版 derive 自 PRD + backend source |
 | 2026-06-08 | Sprint 1 補 test 行動:3 份新 test (RBAC/WorkLog/Agent),3 個 P0 US 升至 PASS-UNIT,coverage 5%→25% |
+| 2026-06-08 | Sprint 1 補 E2E:Playwright + critical-path.spec.ts,3 tests 過,5 個 P0 US 升至 PASS-E2E |
 
 ---
 

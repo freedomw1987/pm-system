@@ -25,7 +25,7 @@
 - **修復成本**: 3-5 個工作日(Playwright + fixture)
 - **業務影響**: High — 紅線 17 必需要 smoke test
 - **建議**: P0,跟 TD-001 同期
-- **2026-06-08 進展**: 仲未開始
+- **2026-06-08 進展**: ✅ **已補 E2E framework** — `e2e/tests/critical-path.spec.ts` 3 tests pass(health check + login flow + happy path)
 
 ### 🟡 TD-003: Backend Dockerfile runtime image 較大
 
@@ -131,3 +131,4 @@
 |------|------|
 | 2026-06-08 | 初版 10 個 debt entry |
 | 2026-06-08 | TD-001 進展:3 份新 test,3 P0 US 升至 PASS-UNIT |
+| 2026-06-08 | TD-002 完成 ✅ — Playwright E2E + critical-path.spec.ts |
