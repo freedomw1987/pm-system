@@ -9,3 +9,6 @@ DEPLOY.md
 docs/_html/
 docs/_meta/
 docs/*-user-manual.html
+
+# PM-System client release artifacts (built by scripts/build-release.sh)
+deploy/dist/
