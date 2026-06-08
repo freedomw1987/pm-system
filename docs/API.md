@@ -1,10 +1,13 @@
 # API 文檔
 
+> **Status**: 🟡 對齊中(2026-06-08) — endpoint 列表對齊 `backend/src/routes/*.ts`,response shape 可能有 drift,以 backend source 為準。
+
 ## 基礎信息
 
 - **Base URL**: `http://localhost:4000/api`
 - **認證方式**: Bearer Token（JWT）
 - **Content-Type**: `application/json`
+- **Auth Header**: `Authorization: Bearer <accessToken>`
 
 ---
 
