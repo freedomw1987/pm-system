@@ -517,17 +517,17 @@ Wiki 页面支持以下功能：
 
 ### 15.3 我修改完角色之后管理员账号出现 403 错误
 
-**原因**：已知缺陷 — 后端的 `rolePermissionCache` 在修改角色后不会自动刷新（详见 `docs/TECH-DEBT.md`）。
+**之前的问题**：已知缺陷 — 后端的 `rolePermissionCache` 在修改角色后不会自动刷新（详见 `docs/TECH-DEBT.md` RG-007）。
 
-**临时解决方案**：
+**2026-06-09 已修复**：
+- 整个移除 `rolePermissionCache`,改为每次请求实时查询数据库
+- 修改角色的权限后**立即生效**,不再需要 `docker compose restart`
+- 4 个回归测试守住源代码不再有缓存（`role-cache-no-cache.test.ts`）
 
-```bash
-# 重启后端容器
-cd ~/www/pm-system
-docker compose restart backend
-```
-
-重启后将重新加载权限缓存。
+**如果仍然遇到 403**：
+1. 点击**重新登录**(刷新令牌会携带新权限)
+2. 仍有问题 → 可能是浏览器缓存,按 **Ctrl+Shift+R** 硬刷新
+3. 仍未解决 → 提交缺陷工单,可能存在其他原因
 
 ### 15.4 无法修改工时
 
