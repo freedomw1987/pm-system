@@ -6,7 +6,14 @@
  */
 
 import { Elysia } from 'elysia'
+import { PrismaClient } from '@prisma/client'
 import { prisma } from '../utils/prisma'
+import {
+  extractWsAuthParams,
+  wsCloseCodeForReason,
+  buildAgentWelcomeMessage,
+  type WsCloseReason
+} from './ws-handler-helpers'
 import { hasPermission } from '../middleware/permission'
 
 // Connected agents map: agentId -> WebSocket
@@ -354,29 +361,28 @@ export function handleHeartbeat(agentId: string, payload: HeartbeatPayload): voi
 export const agentWebSocketRoutes = new Elysia({ prefix: '/ws/agents' })
   .ws('/', {
     open(ws) {
-      // Extract agent token from query params
-      const url = new URL(ws.raw.url, 'http://localhost')
-      const token = url.searchParams.get('token')
-      const agentId = url.searchParams.get('agentId')
-
-      if (!token || !agentId) {
-        ws.close(4001, 'Missing authentication')
+      // Extract agent token from query params (extracted to pure helper, see
+      // ws-handler-helpers.ts / RG-010 — unit tested in isolation).
+      const params = extractWsAuthParams(ws.raw.url)
+      if (!params) {
+        ws.close(wsCloseCodeForReason('missing'), 'Missing authentication')
         return
       }
+      const { token, agentId } = params
 
       // Verify agent exists and token is valid
       prisma.user.findUnique({
         where: { id: agentId, isAgent: true }
       }).then(agent => {
         if (!agent) {
-          ws.close(4003, 'Invalid agent')
+          ws.close(wsCloseCodeForReason('invalid_agent'), 'Invalid agent')
           return
         }
 
         // Verify token matches stored token
         const storedToken = (agent.agentConfig as any)?.token
         if (!storedToken || storedToken !== token) {
-          ws.close(4002, 'Invalid token')
+          ws.close(wsCloseCodeForReason('invalid_token'), 'Invalid token')
           return
         }
 
@@ -393,12 +399,12 @@ export const agentWebSocketRoutes = new Elysia({ prefix: '/ws/agents' })
 
         console.log(`Agent ${agentId} connected via WebSocket`)
 
-        // Send welcome message
-        ws.send(JSON.stringify({
-          type: 'ping',
-          payload: { message: 'Connected to PM System Agent Runtime' },
-          timestamp: Date.now()
-        }))
+        // Send welcome message (built by pure helper, RG-010)
+        ws.send(buildAgentWelcomeMessage(
+          agentId,
+          'Connected to PM System Agent Runtime',
+          Date.now()
+        ))
 
         // Send available tasks
         getAvailableTasks(undefined, 5).then(tasks => {
@@ -410,7 +416,7 @@ export const agentWebSocketRoutes = new Elysia({ prefix: '/ws/agents' })
         })
       }).catch(error => {
         console.error('Agent auth error:', error)
-        ws.close(4002, 'Authentication failed')
+        ws.close(wsCloseCodeForReason('auth_failed'), 'Authentication failed')
       })
     },
     message(ws, message) {

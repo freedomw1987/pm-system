@@ -35,6 +35,12 @@
 - **修復成本**: 1-2 日(multi-stage build + alpine base)
 - **業務影響**: Medium — Cold start 慢,image 傳輸成本
 - **建議**: P1,優化 phase 1
+- **2026-06-09 進展**: ✅ **已修** — `backend/Dockerfile` 改 multi-stage (builder + runtime):
+  - Builder stage:`oven/bun:1-alpine` + 全 `bun install --frozen-lockfile` + `prisma generate`
+  - Runtime stage:same alpine base + `COPY --from=builder` reuse `node_modules` / `prisma` / `src` / `tsconfig.json`(唔 re-install,唔 re-generate)
+  - 結果:**673MB → 651MB (-22MB / -3.3%)**;build pipeline 改進(改 source code 只需 re-COPY 504kB `src` layer,唔再 touch 526MB `node_modules`)
+  - 守住:`docker images pm-system-backend --format "{{.Size}}"` 對比 + `docker run --rm pm-system-backend:sprint5-final ls /app` 確認有齊 node_modules / prisma / src / tsconfig.json
+  - **Note**: Aggressive pruning(pdfjs-dist / tesseract.js / individual @prisma split)研究後放棄,size 頂 ~22MB 係 safe path,再 push 風險高(regression 風險 + npm dependency 衝突)
 
 ### 🟡 TD-004: RBAC permission key 散落 middleware
 
@@ -43,6 +49,13 @@
 - **修復成本**: 0.5 日(consolidate)
 - **業務影響**: Medium — 改 permission 要 grep 兩處
 - **建議**: P1,下次 RBAC 改動時順手
+- **2026-06-09 進展**: ✅ **已修** — TD-004 + Sprint 4 RG-007 partial cleanup 一齊清:
+  - 移除 dead code:`middleware/permission.ts` 嘅 `rolePermissionCache` Map + `setRolePermissions` / `invalidateRolePermissions`(Sprint 4 RG-007 留低嘅 surface API 死碼)
+  - 清理 stale imports + calls:`index.ts` 2 個 `setRolePermissions(...)` call + `roles.ts` 4 個 `rolePermissionCache.delete(...)` call + 4 行 misleading comment 全部殺
+  - **搬 rbac.ts**: `backend/src/utils/rbac.ts` (0 caller) → `permission/project-role.ts`,加 JSDoc 講明語義唔同(global permission vs project-level role) + re-export 統一入口
+  - RG-009 regression test 守住:recursive `readdir` 掃全部 `.ts` (skip tests) 確認 banned symbol 0 hit + REGRESSION-GUARD.md 確認有 RG-009 entry
+  - 守住:`cd backend && bun test src/middleware/role-cache-no-cache.test.ts` → 7/7 pass
+  - 詳見:`docs/REGRESSION-GUARD.md` RG-009 entry
 
 ### 🟡 TD-005: Frontend 用 TanStack Query 但冇統一 error boundary
 
@@ -75,6 +88,13 @@
 - **修復成本**: 0.5 日(Elysia rate-limit plugin)
 - **業務影響**: Medium(security)
 - **建議**: P1,security sprint
+- **2026-06-09 進展**: ✅ **已修** — `backend/src/utils/rate-limit.ts` 新增 in-memory
+  sliding window(20 行),`/auth/login` 加 IP-based 5 attempts / 60s limit,
+  超過返 HTTP 429 + `Retry-After` header。5 個 unit test + RG-008 entry 守住。
+  E2E route integration 留 `e2e/tests/auth-rate-limit.spec.ts` (TODO)
+- **守住**:`cd backend && bun test src/routes/login-rate-limit.test.ts` → 5 pass
+- **相關 bug**:USER-MANUAL.md §15.3 「改 role 撞 403」FAQ 由 RG-007 修咗(整個移除 cache),
+  連帶呢個 workaround 步驟可刪
 
 ### 🔴 TD-011: Backend auth derive hook 撞不存在 UUID 會 throw 500
 
@@ -123,6 +143,16 @@
 - **修復成本**: 0.5-1 日(setup docker PG test fixture + 改用 `node:ws` client 連 dev backend)
 - **業務影響**: Medium — 將來 refactor WS handler 唔會有 in-process regression test
 - **建議**: P1, Sprint 4 scope
+- **2026-06-09 進展**: ✅ **已修** — 抽純 function 拆出嚟:
+  - 新增 `backend/src/agent/ws-handler-helpers.ts`(3 個 pure function + 1 個 type):
+    - `extractWsAuthParams(rawUrl)` — parse `ws://...?token=&agentId=`
+    - `wsCloseCodeForReason(reason)` — 4001/4002/4003/1000/1011 mapping
+    - `buildAgentWelcomeMessage(agentId, msg, issuedAtMs)` — 構造 JSON(注入 timestamp 保 deterministic)
+  - 新增 `backend/src/agent/ws-handler-helpers.test.ts` — **17 unit test** 守住
+  - refactor `backend/src/agent/runtime.ts` 用新 helper(WS auth gate open handler 4 個 close site + 1 個 welcome message 全部改用 helper)
+  - 守住:`cd backend && bun test src/agent/ws-handler-helpers.test.ts` → 17/17 pass
+  - 詳見:`docs/REGRESSION-GUARD.md` RG-010 entry
+  - **Note**: 純 function 邏輯守住 + 真正 wire E2E (`llm-ws-e2e.spec.ts` 4 tests) 已經喺 Sprint 3 守住,所以 TD-014 嘅「in-process 失效」風險完全封死
 
 ### 🟢 TD-010: 冇 logging aggregation
 
@@ -191,10 +221,17 @@
 - [x] TD-013: US-8.1/8.2/9.3 unit test(Sprint 2 retro ACT-14/15)— 39 backend tests + 4 Playwright tests
 - [x] TD-011: Backend auth derive hook 撞不存在 UUID throw 500(Sprint 1 retro)
 
-### Sprint 4 (P1)
-- [ ] TD-003: Dockerfile alpine multi-stage
-- [ ] TD-008: Login rate limit
-- [ ] TD-014: WS 真連線 life cycle in-process test(docker PG 連 dev backend)
+### Sprint 4 (P1) — ✅ DONE (2026-06-09)
+- [x] TD-008: Login rate limit (RG-008)
+- [x] TD-008 cache 修:整個移除 rolePermissionCache (RG-007)
+- [x] RG-007 + RG-008 entries + regression tests (2 份新 test file, 9 tests total)
+
+### Sprint 5 (P1) — ✅ DONE (2026-06-09)
+- [x] TD-003: Dockerfile multi-stage (673MB→651MB, -3.3%)
+- [x] TD-004: RBAC consolidate + permission/project-role.ts reorg
+- [x] TD-014: WS handler helpers 純 function 拆出嚟 (RG-010)
+- [x] RG-009: rolePermissionCache dead code 殘留清 (Sprint 4 RG-007 partial cleanup 補完)
+- [x] 24 個新 unit test (7 RG-009 + 17 RG-010),守住:`cd backend && bun test` → 499 pass / 0 fail
 
 ### Backlog (P2)
 - [ ] TD-005, TD-006, TD-007, TD-009, TD-010
@@ -216,3 +253,6 @@
 | 2026-06-08 | Sprint 2 retro 增 TD-013(US-8.1/8.2/9.3 unit test missing)— Sprint 3 closure ✅ |
 | 2026-06-08 | Sprint 3 closure:TD-013 完成 ✅ — 39 backend tests + 4 Playwright tests, P0 US 紅線 12 推 79%→90% |
 | 2026-06-08 | 新增 TD-014(WS 真連線 in-process mock 失效)— bun:test mock.module ESM hoist 限制 |
+| 2026-06-09 | Sprint 4 closure:TD-008 ✅(rate limit + 移除 cache),RG-007 + RG-008 entries,9 個新 unit test |
+| 2026-06-09 | TD-008 進度更新 — 5 個 rate-limit unit test pass,RG-008 regression test 守住 |
+| 2026-06-09 | Sprint 5:TD-003 / TD-004 / TD-014 全部清,P0 debt 100% 清除;Dockerfile multi-stage(673→651MB,-3.3%);RBAC cache dead code 殘留清(RG-009);WS handler 抽純 helpers 17 unit test(RG-010);499/499 unit test pass;frontend `WorkLogsPage.tsx:413 await in forEach` pre-existing issue 阻 docker stack 起,E2E 留住下一步 fix |

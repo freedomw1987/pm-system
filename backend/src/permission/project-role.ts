@@ -1,4 +1,4 @@
-import { prisma } from '../utils/prisma'
+import { prisma } from '../../utils/prisma'
 
 /**
  * Check if a user has a specific role in a specific project.
@@ -34,3 +34,16 @@ export async function getUserProjectRole(userId: string, userRole: string, proje
 
   return membership?.role || null
 }
+
+/**
+ * Project-level role checks (project membership, role within project).
+ * Distinct from `hasPermission` (middleware/permission.ts) which checks
+ * global permissions from the user's role.
+ *
+ * Re-exported here so callers have a single import surface for "auth & RBAC":
+ *   import { hasPermission, checkProjectRole } from '../permission'
+ *
+ * Currently 0 callers in the codebase — exported for future use when
+ * project-scoped features (e.g. "is user a project lead?") are added.
+ */
+export { checkProjectRole, getUserProjectRole } from './project-role'

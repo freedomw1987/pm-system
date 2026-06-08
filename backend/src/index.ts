@@ -22,7 +22,6 @@ import { tokenLogRoutes } from './routes/tokenlogs'
 import { agentWebSocketRoutes, agentManagementRoutes, agentHealthRoutes } from './agent/runtime'
 import { PrismaClient } from '@prisma/client'
 import { prisma } from './utils/prisma'
-import { setRolePermissions } from './middleware/permission'
 
 // ─── Role permissions loader (RG-007 fix) ─────────────────────────────────────
 // No in-memory cache — RBAC changes take effect immediately for all users.
@@ -36,19 +35,13 @@ function getPrisma(): PrismaClient {
 async function loadRolePermissions(roleName: string): Promise<string[]> {
   const prisma = getPrisma()
   const role = await prisma.role.findUnique({ where: { name: roleName } })
-  const permissions = role?.permissions ?? []
-  // Sync to middleware map (hasPermission reads from user.permissions directly,
-  // but we keep middleware map for any future readers + backward compat)
-  setRolePermissions(roleName, permissions)
-  return permissions
+  return role?.permissions ?? []
 }
 
 export async function refreshAllRolePermissions() {
   const prisma = getPrisma()
   const roles = await prisma.role.findMany({ select: { name: true, permissions: true } })
-  for (const role of roles) {
-    setRolePermissions(role.name, role.permissions)
-  }
+  return roles.map((r) => ({ name: r.name, permissions: r.permissions }))
 }
 
 // ─── Auth derive ──────────────────────────────────────────────────────────────

@@ -31,24 +31,6 @@ export interface AuthUser {
 }
 
 /**
- * Global cache for role permissions. Exported so index.ts can manage it.
- * Map<roleName, permissions[]>
- */
-export const rolePermissionCache = new Map<string, string[]>()
-
-export function setRolePermissions(roleName: string, permissions: string[]) {
-  rolePermissionCache.set(roleName, permissions)
-}
-
-export function invalidateRolePermissions(roleName?: string) {
-  if (roleName) {
-    rolePermissionCache.delete(roleName)
-  } else {
-    rolePermissionCache.clear()
-  }
-}
-
-/**
  * Check if the user has a specific permission.
  * Falls back to true for admin role (admin has all permissions).
  */

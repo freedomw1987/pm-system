@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { rolePermissionCache, hasPermission } from '../middleware/permission'
+import { hasPermission } from '../middleware/permission'
 
 const DEFAULT_PERMISSIONS = [
   { key: 'projects.view', name: '項目視圖', category: '項目管理' },
@@ -270,8 +270,6 @@ const roleRoutes = new Elysia({ prefix: '/roles' })
           isBuiltIn: false,
         },
       })
-      // Invalidate cache for this role
-      rolePermissionCache.delete(normalizedName)
       // Refresh all roles so admin permissions are up-to-date
       const { refreshAllRolePermissions } = await import('../index')
       await refreshAllRolePermissions()
@@ -337,10 +335,6 @@ const roleRoutes = new Elysia({ prefix: '/roles' })
             updatedAt: true
           }
         })
-        // Invalidate cache so next request re-loads from DB
-        if (role.name) rolePermissionCache.delete(role.name)
-        // Also invalidate old name if it changed
-        if (existing.name !== role.name) rolePermissionCache.delete(existing.name)
         // Refresh all roles so admin permissions are up-to-date
         const { refreshAllRolePermissions } = await import('../index')
         await refreshAllRolePermissions()
@@ -381,8 +375,7 @@ const roleRoutes = new Elysia({ prefix: '/roles' })
 
     await prisma.role.delete({ where: { id: params.id } })
 
-    // Invalidate cache and refresh so admin permissions are up-to-date
-    rolePermissionCache.delete(role.name)
+    // Refresh all roles so admin permissions are up-to-date
     const { refreshAllRolePermissions } = await import('../index')
     await refreshAllRolePermissions()
 
