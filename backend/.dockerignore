@@ -7,3 +7,6 @@ dist
 *.log
 README.md
 CLAUDE.md
+# IMPORTANT: keep seed files in image (run inside container on first boot)
+!prisma/seed.ts
+!prisma/seed-agent.ts
