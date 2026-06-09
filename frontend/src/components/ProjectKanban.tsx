@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { FormEvent } from 'react'
 import { Plus, Grip, Bot, User } from 'lucide-react'
 import { requirementApi, taskApi, projectApi } from '../utils/api'
 import type { Requirement, Task } from '../types'
@@ -172,7 +171,7 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
     setDraggedTask(null)
   }
 
-  const handleAddTask = async (e: FormEvent) => {
+  const handleAddTask = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!newTaskTitle.trim() || !selectedRequirement) return
 
@@ -388,6 +387,7 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
         assigneeOptions={members.map((m): MemberOption => ({ id: m.id, name: m.name }))}
         participantOptions={members.map((m): MemberOption => ({ id: m.id, name: m.name }))}
         parentTaskOptions={allTasks.map((t) => ({ id: t.id, title: t.title }))}
+        submitLabel="建立任務"
         isSubmitting={isAddingTask}
         onSubmit={handleAddTask}
       />

@@ -12,6 +12,7 @@ import ProjectKanban from '../components/ProjectKanban'
 import ToggleMultiSelect from '../components/ToggleMultiSelect'
 import Pagination from '../components/Pagination'
 import AddTaskModal, { type MemberOption } from '../components/AddTaskModal'
+import AddBugModal from '../components/AddBugModal'
 import { useTaskRecommendation } from '../hooks/useTaskRecommendation'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
@@ -98,7 +99,7 @@ export default function ProjectDetailPage() {
   const [showAddBugModal, setShowAddBugModal] = useState(false)
   const [newBugTitle, setNewBugTitle] = useState('')
   const [newBugDesc, setNewBugDesc] = useState('')
-  const [newBugSeverity, setNewBugSeverity] = useState('medium')
+  const [newBugSeverity, setNewBugSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('medium')
   const [newBugAssignee, setNewBugAssignee] = useState('')
   const [isAddingBug, setIsAddingBug] = useState(false)
 
@@ -199,7 +200,7 @@ export default function ProjectDetailPage() {
     })
   }
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleAddMember = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!selectedUserId) return
     setIsAddingMember(true)
@@ -258,7 +259,7 @@ export default function ProjectDetailPage() {
   }, [bugs, searchBug])
 
   // ── Requirement actions ──────────────────────────────────────
-  const handleAddRequirement = async (e: React.FormEvent) => {
+  const handleAddRequirement = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!newReqTitle.trim()) return
     setIsAddingReq(true)
@@ -275,7 +276,7 @@ export default function ProjectDetailPage() {
   }
 
   // ── Task actions ─────────────────────────────────────────────
-  const handleAddTask = async (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!newTaskTitle.trim()) return
     setIsAddingTask(true)
@@ -368,7 +369,7 @@ export default function ProjectDetailPage() {
     setShowWorkLogModal(true)
   }
 
-  const handleWorkLogSubmit = async (e: React.FormEvent) => {
+  const handleWorkLogSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!workLogTarget) return
 
@@ -399,7 +400,7 @@ export default function ProjectDetailPage() {
   }
 
   // ── Bug actions ──────────────────────────────────────────────
-  const handleAddBug = async (e: React.FormEvent) => {
+  const handleAddBug = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!newBugTitle.trim()) return
     setIsAddingBug(true)
@@ -426,7 +427,7 @@ export default function ProjectDetailPage() {
     setEditTaskStatus(task.status)
   }
 
-  const handleEditTask = async (e: React.FormEvent) => {
+  const handleEditTask = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!editingTask) return
     setIsEditingTask(true)
@@ -468,7 +469,7 @@ export default function ProjectDetailPage() {
     setEditBugAssignee(bug.assignee?.id || '')
   }
 
-  const handleEditBug = async (e: React.FormEvent) => {
+  const handleEditBug = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!editingBug) return
     setIsEditingBug(true)
@@ -509,7 +510,7 @@ export default function ProjectDetailPage() {
     setEditReqPriority(req.priority)
   }
 
-  const handleEditRequirement = async (e: React.FormEvent) => {
+  const handleEditRequirement = async (e: React.SyntheticEvent) => {
     e.preventDefault()
     if (!editingReq) return
     setIsEditingReq(true)
@@ -1033,17 +1034,21 @@ export default function ProjectDetailPage() {
         assigneeOptions={assigneeOptions}
         participantOptions={participantOptions}
         parentTaskOptions={tasks}
+        submitLabel="建立任務"
         isSubmitting={isAddingTask}
         onSubmit={handleAddTask}
       />
       <AddBugModal
-        showAddBugModal={showAddBugModal} setShowAddBugModal={setShowAddBugModal}
-        newBugTitle={newBugTitle} setNewBugTitle={setNewBugTitle}
-        newBugDesc={newBugDesc} setNewBugDesc={setNewBugDesc}
-        newBugSeverity={newBugSeverity} setNewBugSeverity={setNewBugSeverity}
-        newBugAssignee={newBugAssignee} setNewBugAssignee={setNewBugAssignee}
-        isAddingBug={isAddingBug} handleAddBug={handleAddBug}
+        open={showAddBugModal}
+        onClose={() => setShowAddBugModal(false)}
+        title={newBugTitle} setTitle={setNewBugTitle}
+        description={newBugDesc} setDescription={setNewBugDesc}
+        severity={newBugSeverity} setSeverity={setNewBugSeverity}
+        assigneeId={newBugAssignee} setAssigneeId={setNewBugAssignee}
         assigneeOptions={assigneeOptions}
+        submitLabel="建立缺陷"
+        isSubmitting={isAddingBug}
+        onSubmit={handleAddBug}
       />
       <EditTaskModal
         editingTask={editingTask} setEditingTask={setEditingTask}
@@ -1555,123 +1560,64 @@ function AgentTasksList({ projectId }: { projectId: string }) {
   )
 }
 
-// ── Add Bug Modal ──────────────────────────────────────────────────────
-function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewBugTitle, newBugDesc, setNewBugDesc, newBugSeverity, setNewBugSeverity, newBugAssignee, setNewBugAssignee, isAddingBug, handleAddBug, assigneeOptions }: any) {
-  if (!showAddBugModal) return null
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">新建缺陷</h2>
-          <button onClick={() => setShowAddBugModal(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-        </div>
-        <form onSubmit={handleAddBug} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-            <input type="text" value={newBugTitle} onChange={(e) => setNewBugTitle(e.target.value)} className="input-field w-full" placeholder="輸入缺陷標題" required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-            <RichTextEditor value={newBugDesc} onChange={setNewBugDesc} placeholder="輸入缺陷描述" rows={6} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
-            <select value={newBugSeverity} onChange={(e) => setNewBugSeverity(e.target.value)} className="input-field w-full">
-              <option value="low">輕微</option>
-              <option value="medium">中等</option>
-              <option value="high">高</option>
-              <option value="critical">嚴重</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-            <select value={newBugAssignee} onChange={(e) => setNewBugAssignee(e.target.value)} className="input-field w-full">
-              <option value="">-- 不指定 --</option>
-              {assigneeOptions.map((m: MemberOption) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-3 justify-end pt-2">
-            <button type="button" onClick={() => setShowAddBugModal(false)} className="btn-secondary">取消</button>
-            <button type="submit" disabled={isAddingBug} className="btn-primary">
-              {isAddingBug ? '建立中...' : '建立缺陷'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-// ── Edit Task Modal ──────────────────────────────────────────────────────
+// ── Edit Task Modal (Sprint 18 TD-NEW-7: 改用共用 AddTaskModal + extraFields slot) ──
+//
+// 之前 75 行 inline JSX(2026-06-08 寫),同 AddTaskModal 95% identical,只係多
+// 咗 Status dropdown。改成 thin wrapper,所有 8 個 field 共用 AddTaskModal,只係:
+//   - heading 改「編輯任務」(加 wrapper div)
+//   - submit label 改「保存」
+//   - extraFields slot 注 Status dropdown(Edit 專用)
+//
+// Drift 風險:0 — AddTaskModal 改 field 都自動傳到 Edit
+// 行數:75 行 inline → 36 行 wrapper (-52%)
 function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTaskTitle, editTaskDesc, setEditTaskDesc, editTaskAssignee, setEditTaskAssignee, editTaskParticipantIds, setEditTaskParticipantIds, editTaskParentId, setEditTaskParentId, editTaskStatus, setEditTaskStatus, isEditingTask, handleEditTask, tasks, assigneeOptions, participantOptions }: any) {
-  if (!editingTask) return null
+  // Edit 過濾掉自己(parent task options 唔可以揾返自己)
+  const filteredParentOptions = (tasks || [])
+    .filter((task: Task) => task.id !== editingTask?.id)
+    .map((t: Task) => ({ id: t.id, title: t.title }))
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">編輯任務</h2>
-          <button onClick={() => setEditingTask(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+    <AddTaskModal
+      open={editingTask !== null}
+      titleText="編輯任務"
+      onClose={() => setEditingTask(null)}
+      title={editTaskTitle}
+      setTitle={setEditTaskTitle}
+      description={editTaskDesc}
+      setDescription={setEditTaskDesc}
+      assigneeId={editTaskAssignee}
+      setAssigneeId={setEditTaskAssignee}
+      participantIds={editTaskParticipantIds}
+      setParticipantIds={setEditTaskParticipantIds}
+      parentTaskId={editTaskParentId}
+      setParentTaskId={setEditTaskParentId}
+      // Edit mode: 唔需要 smart-assign panel(edit task 已經有 assignee,推薦多餘)
+      // 用 fixed 默認值 + setter dummy(EditTaskModal 唔用,但要 pass prop)
+      autoAssignAgent={false}
+      setAutoAssignAgent={() => { /* no-op for edit */ }}
+      recommendedAgent={null}
+      assigneeOptions={assigneeOptions as MemberOption[]}
+      participantOptions={participantOptions as MemberOption[]}
+      parentTaskOptions={filteredParentOptions}
+      extraFields={
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+          <select
+            value={editTaskStatus}
+            onChange={(e) => setEditTaskStatus(e.target.value)}
+            className="input-field w-full"
+          >
+            <option value="pending">待處理</option>
+            <option value="in_progress">進行中</option>
+            <option value="testing">測試中</option>
+            <option value="completed">已完成</option>
+          </select>
         </div>
-        <form onSubmit={handleEditTask} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-            <input type="text" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="input-field w-full" required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-            <RichTextEditor value={editTaskDesc} onChange={setEditTaskDesc} rows={6} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-              <select value={editTaskStatus} onChange={(e) => setEditTaskStatus(e.target.value)} className="input-field w-full">
-                <option value="pending">待處理</option>
-                <option value="in_progress">進行中</option>
-                <option value="testing">測試中</option>
-                <option value="completed">已完成</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-              <select value={editTaskAssignee} onChange={(e) => setEditTaskAssignee(e.target.value)} className="input-field w-full">
-                <option value="">-- 不指定 --</option>
-                {assigneeOptions.map((m: MemberOption) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
-              <ToggleMultiSelect
-                options={participantOptions}
-                value={editTaskParticipantIds}
-                onChange={setEditTaskParticipantIds}
-                className="w-full"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
-              <select value={editTaskParentId} onChange={(e) => setEditTaskParentId(e.target.value)} className="input-field w-full">
-                <option value="">无父任务</option>
-                {tasks?.filter((task: Task) => task.id !== editingTask.id).map((task: Task) => (
-                  <option key={task.id} value={task.id}>{task.title}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-3 justify-end pt-2">
-            <button type="button" onClick={() => setEditingTask(null)} className="btn-secondary">取消</button>
-            <button type="submit" disabled={isEditingTask} className="btn-primary">
-              {isEditingTask ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      }
+      submitLabel="保存"
+      isSubmitting={isEditingTask}
+      onSubmit={handleEditTask}
+    />
   )
 }
 

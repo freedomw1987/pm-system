@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { X, Bot } from 'lucide-react'
 import RichTextEditor from './RichTextEditor'
 import ToggleMultiSelect from './ToggleMultiSelect'
@@ -18,6 +19,8 @@ export interface AddTaskModalProps {
   // Visibility
   open: boolean
   onClose: () => void
+  /** Override heading text。default "新建任務";Edit mode 改 "編輯任務" */
+  titleText?: string
 
   // Form state (controlled)
   title: string
@@ -41,14 +44,22 @@ export interface AddTaskModalProps {
   participantOptions: MemberOption[]
   parentTaskOptions: Pick<Task, 'id' | 'title'>[]
 
+  // TD-NEW-7 (Sprint 18): extraFields slot —— EditTaskModal 用嚟 inject
+  // Status dropdown (Edit 專用) 而唔等 share 邏輯。Slot 喺「父任務」select
+  // 後面 render,add/remove 唔影響其他 field。Create flow 唔 pass(slot undefined)
+  // 行為同 Sprint 17 統一後完全一樣。
+  extraFields?: ReactNode
+
   // Submission
+  submitLabel: string
   isSubmitting: boolean
-  onSubmit: (e: React.FormEvent) => void
+  onSubmit: (e: React.SyntheticEvent) => void
 }
 
 export default function AddTaskModal({
   open,
   onClose,
+  titleText = '新建任務',
   title,
   setTitle,
   description,
@@ -65,6 +76,8 @@ export default function AddTaskModal({
   assigneeOptions,
   participantOptions,
   parentTaskOptions,
+  extraFields,
+  submitLabel,
   isSubmitting,
   onSubmit,
 }: AddTaskModalProps) {
@@ -74,7 +87,7 @@ export default function AddTaskModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">新建任務</h2>
+          <h2 className="text-lg font-bold text-gray-900">{titleText}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -208,6 +221,8 @@ export default function AddTaskModal({
             </select>
           </div>
 
+          {extraFields}
+
           <div className="flex gap-3 justify-end pt-2">
             <button type="button" onClick={onClose} className="btn-secondary">
               取消
@@ -217,7 +232,7 @@ export default function AddTaskModal({
               disabled={!title.trim() || isSubmitting}
               className="btn-primary"
             >
-              {isSubmitting ? '建立中...' : '建立任務'}
+              {isSubmitting ? '儲存中...' : submitLabel}
             </button>
           </div>
         </form>
