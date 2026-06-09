@@ -4,6 +4,7 @@
  * 涵蓋:
  *  - US-6.2 (P0): server-side pagination (commit 9adc1fa)
  *  - US-6.3 (P1): Excel export uses `limit=-1` 同 `limit>0` 路徑
+ *  - US-6.4 (P0): department / userId 篩選 + RBAC gate(Sprint 10)
  *  - RG 守衛: "上個月 cutoff" 規則(5 號當月)— 防止 PM 改壞規則
  *
  * 因為 worklogs.ts 嘅邏輯入面 route,冇 extract helper 出嚟,呢度 derive
@@ -165,5 +166,128 @@ describe('WorkLog previous-month cutoff (RG guard)', () => {
     const now = new Date('2026-06-10T00:00:00')
     const logDate = new Date('2026-06-04T23:59:59')
     expect(isEditableForCurrentMonth(logDate, now)).toBe(false)
+  })
+})
+
+/**
+ * 從 worklogs.ts GET derive 嘅 RBAC + 篩選 where 條件組合(US-6.4)
+ * 保持同 source 完全一致(worklogs.ts:24-62):
+ *  - canViewAll=false: 強制 where.userId = user.id,忽略 query.userId / query.departmentId
+ *  - canViewAll=true:  按 query 條件疊加 userId / departmentId / projectId / date range
+ *  - projectId filter 用 OR 跨 task + bug(同 commit 9adc1fa 一致)
+ *  - departmentId 需要 canViewAll 才有作用(RBAC gate)
+ */
+function buildWorkLogFilterWhere(
+  query: {
+    userId?: string
+    departmentId?: string
+    projectId?: string
+    startDate?: string
+    endDate?: string
+  },
+  currentUser: { id: string; role?: string },
+  canViewAll: boolean
+): Record<string, any> {
+  const where: Record<string, any> = {}
+
+  if (!canViewAll) {
+    // Non-admin: 強制只看自己,query.userId 即使帶咗都忽略
+    where.userId = currentUser.id
+  } else if (query.userId) {
+    // Admin 帶 userId filter: 過濾到特定 user
+    where.userId = query.userId
+  }
+
+  // projectId filter — 跨 task + bug,任何權限都可用(項目內查工時)
+  if (query.projectId) {
+    where.OR = [
+      { task: { projectId: query.projectId } },
+      { bug: { projectId: query.projectId } },
+    ]
+  }
+
+  // date range
+  const dateFilter: Record<string, Date> = {}
+  if (query.startDate) dateFilter.gte = new Date(query.startDate)
+  if (query.endDate) {
+    const endDate = new Date(query.endDate)
+    endDate.setHours(23, 59, 59, 999)
+    dateFilter.lte = endDate
+  }
+  if (Object.keys(dateFilter).length > 0) {
+    where.date = dateFilter
+  }
+
+  // departmentId filter — 必須 canViewAll,否則忽略(RBAC gate)
+  if (query.departmentId && canViewAll) {
+    where.user = { departmentId: query.departmentId }
+  }
+
+  return where
+}
+
+describe('WorkLog filter + RBAC (US-6.4, Sprint 10)', () => {
+  const alice = { id: 'u-alice', role: 'developer' }
+  const admin = { id: 'u-admin', role: 'admin' }
+
+  test('non-admin 預設只看自己嘅 log,即使冇 query.userId', () => {
+    const where = buildWorkLogFilterWhere({}, alice, false)
+    expect(where.userId).toBe('u-alice')
+  })
+
+  test('non-admin 即使帶 query.userId 都會被忽略(安全 RBAC)', () => {
+    const where = buildWorkLogFilterWhere({ userId: 'u-bob' }, alice, false)
+    expect(where.userId).toBe('u-alice')
+    // 唔可以 leak 其他人嘅 data
+  })
+
+  test('non-admin 即使帶 query.departmentId 都會被忽略', () => {
+    const where = buildWorkLogFilterWhere({ departmentId: 'd-1' }, alice, false)
+    expect(where.user).toBeUndefined()
+  })
+
+  test('admin 帶 query.userId → 過濾到特定 user', () => {
+    const where = buildWorkLogFilterWhere({ userId: 'u-bob' }, admin, true)
+    expect(where.userId).toBe('u-bob')
+  })
+
+  test('admin 帶 query.departmentId → 加 where.user filter', () => {
+    const where = buildWorkLogFilterWhere({ departmentId: 'd-1' }, admin, true)
+    expect(where.user).toEqual({ departmentId: 'd-1' })
+  })
+
+  test('projectId filter 跨 task + bug(OR 條件),非 admin 都可以用', () => {
+    const where = buildWorkLogFilterWhere({ projectId: 'p-1' }, alice, false)
+    expect(where.OR).toEqual([
+      { task: { projectId: 'p-1' } },
+      { bug: { projectId: 'p-1' } },
+    ])
+    expect(where.userId).toBe('u-alice') // 仍係強制自己
+  })
+
+  test('date range filter (startDate + endDate) 變成 where.date object', () => {
+    const where = buildWorkLogFilterWhere(
+      { startDate: '2026-06-01', endDate: '2026-06-30' },
+      admin,
+      true
+    )
+    expect(where.date.gte).toBeInstanceOf(Date)
+    expect(where.date.lte).toBeInstanceOf(Date)
+    expect((where.date.lte as Date).getHours()).toBe(23) // 當日 23:59:59.999
+  })
+
+  test('departmentId 同 userId 可以並存 — admin view "dept X 嘅 Bob"', () => {
+    const where = buildWorkLogFilterWhere(
+      { departmentId: 'd-1', userId: 'u-bob' },
+      admin,
+      true
+    )
+    expect(where.userId).toBe('u-bob')
+    expect(where.user).toEqual({ departmentId: 'd-1' })
+  })
+
+  test('admin 冇帶任何 filter → 返到所有 log(empty where)', () => {
+    const where = buildWorkLogFilterWhere({}, admin, true)
+    expect(where).toEqual({})
   })
 })
