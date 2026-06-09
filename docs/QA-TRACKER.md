@@ -1,6 +1,11 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 15 closure,David UX 反饋「Dashboard 只 show 自己有份嘅項目」全綠
+> **Status**: 🟢 2026-06-10 — Sprint 16 closure,David UX 反饋「Dashboard 只 show 統計 + 項目清單」全綠(拎走 Recent Projects)
+> **Update**: 2026-06-10 Sprint 16 — Dashboard minimal layout closure:
+>   - **Frontend** Dashboard 拎走「最近訪問」Quick Switch section(David 講「只 show 統計 + 項目清單」,navigation affordance 唔屬於呢類)
+>   - 保留 4 個 widget 統計(進行中任務 / 未解決缺陷 / 本週時數 / 我參與嘅項目)+ 我參與嘅項目 grid (scope=my 嚴格,pageSize 12)
+>   - **E2E:63/63 + 8 skipped**(0 regression,Sprint 15 scope=my 嗰 2 個 E2E 仲 work),Backend unit:606 pass(無 backend 改)
+>   - **Visual verify**:`e2e/scripts/verify-sprint16-dashboard.ts` 確認 desktop + iPhone 14 RWD 0 overflow
 > **Update**: 2026-06-10 Sprint 15 — Dashboard scope=my 嚴格過濾 closure:
 >   - **Backend** `GET /api/projects` 加 `?scope=my` 嚴格只 filter 自己 member 嘅(包括 admin),default 仍然係「member OR 同部門」寬鬆
 >   - **Frontend** `Dashboard` 改用 `scope=my` 攞自己參與嘅項目,widget 4 由「項目總數」改「我參與嘅項目」,empty state 改「暫無我參與嘅項目」
@@ -189,6 +194,33 @@
   - `<EntityAutocomplete>` generic化(Pick<id, name, type> 適用 user / task / bug)
   - Dashboard widget 加 chart(本週時數 sparkline + 按部門)
   - Mobile RWD 全 project audit(目前只 audit 4 個 page,Layout + 其他 page 未 audit)
+
+### Sprint 16 (2026-06-10) 收工摘要 — Dashboard minimal layout
+
+- **目標**:David feedback「Dashboard 只要 show 自己有參與的項目的統計 和項目清單吧」(2026-06-10 follow-up 上 Sprint 15 收工後)
+- **修法**:
+  - **Frontend** `DashboardPage` 拎走「最近訪問」Quick Switch section — 屬 navigation affordance 唔屬於「統計 / 項目清單」兩類
+  - 拎走 4 個組件:`RECENT_PROJECTS_KEY` constant + `getRecentProjectIds()` helper + `recentProjectIds` state + `recentProjects` 衍生,合共 -53 行(363 → 310)
+  - 保留 4 個 widget 統計 + 我參與嘅項目 grid(同 Sprint 15 scope=my 一致)
+- **Visual verify**:`e2e/scripts/verify-sprint16-dashboard.ts`(one-off 工具,commit 入 git 留 reference)
+  - Desktop 1440x900:4 個 widget text 全部 present(進行中任務 0 / 未解決缺陷 5 / 本週時數 12h / 我參與嘅項目 192)
+  - 「最近訪問」字串 absent(拎走成功)
+  - 我參與嘅項目 grid heading present
+  - iPhone 14 390x844:overflow=0,body width=390=viewport,RWD 冇 regression
+- **回歸風險**:
+  - 0 backend 改(冇 need `docker compose build backend` / unit test re-run)
+  - 0 scope=my logic 改(Sprint 15 嗰 2 個 E2E 仲 work,proof 喺 `npx playwright test` 63/63 + 8 skipped 全綠)
+  - 0 component API 改(其他 page 唔 import Recent Projects 嘢)
+- **意外發現 / 教訓**:
+  - **LoginPage 冇 name attribute**:L50 input 純 React controlled,冇 `name=`,Playwright `page.fill('input[name="email"]')` 會 timeout,要 fallback `input[type="email"]`。同 E2E 慣用 selector 唔同(Sprint 14 spec 都用 `input[type="email"], input[name="email"]` fallback)
+  - **React Router root = Dashboard via `<Route index>`**:login `navigate('/')` 落 dashboard 唔係 `/dashboard`,waitForURL 要 `url.pathname === '/'`,唔係 `**/dashboard`
+  - **Hermes `sync_playwright` 一次性開,唔可以再 `start()`**:Python script 兩次 `sync_playwright()` 入面再 `chromium.launch()` 撞 context manager 重入,要用同一個 `p` handle
+  - **`hermes redactor` 對 secret 嘅影響**:LoginPage 冇 name 唔關 redactor 事,但 `python3 -c "..."` 用 admin123 喺 bash 都會被 redact,visual verify 一律用 `npx tsx` node script(redact 唔 trace 入去)
+- **紅線狀態**:紅線 11(tracker 同步)✅、紅線 12(P0 US 必有 E2E)N/A(無新 US,純 visual layout)、紅線 13(無 bug fix)N/A
+- **Out of scope(留俾下個 sprint)**:
+  - 4 個 DEFERRED item(T15a/T15b 早已 close,US-10.3 full-text HOLD,`<EntitySubListSection>` refactor,`CreateBugModal` 對齊 `<AddBugModal>`)繼續 hold
+  - `ProjectsPage` 加 `scope=my` toggle UI(Sprint 15 backend 已 support)
+  - Dashboard 改 generic `<EntityAutocomplete>` + `useDashboardData` custom hook 抽 layout
 
 ### Sprint 15 (2026-06-10) 收工摘要 — Dashboard scope=my 嚴格過濾
 
