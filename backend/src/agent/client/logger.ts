@@ -1,8 +1,14 @@
 /**
- * 日志输出工具
+ * 日志输出工具 — TD-010: Structured JSON logging for aggregation
+ *
+ * Features:
+ * - Human-readable format (development) vs JSON format (production)
+ * - ISO timestamps for log aggregation systems (CloudWatch, ELK, Datadog)
+ * - Log levels: debug, info, warn, error
+ * - Optional context fields for structured data
  */
 
-export type LogLevel = 'info' | 'warn' | 'error' | 'debug'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 const LOG_LEVELS: Record<LogLevel, string> = {
   info: 'INFO',
@@ -20,6 +26,9 @@ const LOG_COLORS: Record<LogLevel, string> = {
 
 const RESET = '\x1b[0m'
 
+// TD-010: Detect if we should output JSON (production) or human-readable (development)
+const isProduction = process.env.NODE_ENV === 'production' || process.env.JSON_LOGS === 'true'
+
 class Logger {
   private prefix: string
   private level: LogLevel
@@ -35,25 +44,40 @@ class Logger {
   }
 
   private formatTime(): string {
-    return new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' })
+    // TD-010: ISO format for log aggregation systems
+    return new Date().toISOString()
   }
 
   private log(level: LogLevel, message: string, ...args: any[]) {
     if (!this.shouldLog(level)) return
 
-    const time = this.formatTime()
-    const color = LOG_COLORS[level]
+    const timestamp = this.formatTime()
     const label = LOG_LEVELS[level]
 
-    const parts = [
-      `${color}[${time}]${RESET}`,
-      `${color}[${label}]${RESET}`,
-      `${color}[${this.prefix}]${RESET}`,
-      message,
-      ...args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a))
-    ]
+    if (isProduction) {
+      // TD-010: Structured JSON format for log aggregation
+      const logEntry = {
+        timestamp,
+        level: label,
+        logger: this.prefix,
+        message,
+        ...(args.length > 0 && { args: args.length === 1 ? args[0] : args })
+      }
+      console.log(JSON.stringify(logEntry))
+    } else {
+      // Development: human-readable colored output
+      const color = LOG_COLORS[level]
+      const timeLocal = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' })
 
-    console.log(parts.join(' '))
+      const parts = [
+        `${color}[${timeLocal}]${RESET}`,
+        `${color}[${label}]${RESET}`,
+        `${color}[${this.prefix}]${RESET}`,
+        message,
+        ...args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a))
+      ]
+      console.log(parts.join(' '))
+    }
   }
 
   info(message: string, ...args: any[]) {
@@ -73,12 +97,23 @@ class Logger {
   }
 
   success(message: string, ...args: any[]) {
-    const time = this.formatTime()
-    console.log(
-      `${'\x1b[32m'}[${time}][SUCCESS][${this.prefix}]${RESET}`,
-      message,
-      ...args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a))
-    )
+    // Success uses green, treated as INFO level
+    if (isProduction) {
+      console.log(JSON.stringify({
+        timestamp: this.formatTime(),
+        level: 'SUCCESS',
+        logger: this.prefix,
+        message,
+        ...(args.length > 0 && { args })
+      }))
+    } else {
+      const timeLocal = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' })
+      console.log(
+        `${'\x1b[32m'}[${timeLocal}][SUCCESS][${this.prefix}]${RESET}`,
+        message,
+        ...args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a))
+      )
+    }
   }
 }
 

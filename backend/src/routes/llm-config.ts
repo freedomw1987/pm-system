@@ -20,8 +20,20 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
       updatedAt: config.updatedAt
     }
   })
+  // GET - fetch audit logs (Admin only) — TD-007
+  .get('/audit-logs', async ({ set, user }) => {
+    if (!user || user.role !== 'admin') {
+      set.status = 403
+      return { error: { code: 'FORBIDDEN', message: 'Admin access required' } }
+    }
+    const logs = await prisma.lLMConfigAuditLog.findMany({
+      orderBy: { timestamp: 'desc' },
+      take: 100 // last 100 entries
+    })
+    return { logs }
+  })
   // PUT - update config (Admin only)
-  .put('/', async ({ body, set, user }) => {
+  .put('/', async ({ body, set, user, request }) => {
     if (!user || user.role !== 'admin') {
       set.status = 403
       return { error: { code: 'FORBIDDEN', message: 'Admin access required' } }
@@ -41,7 +53,7 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
       return { error: { code: 'VALIDATION_ERROR', message: 'apiUrl and model are required' } }
     }
 
-    // Upsert: update existing or create new
+    // Get existing config for audit comparison
     const existing = await prisma.lLMConfig.findFirst()
 
     const data: any = {
@@ -58,6 +70,59 @@ const llmConfigRoutes = new Elysia({ prefix: '/llm-config' })
     const config = existing
       ? await prisma.lLMConfig.update({ where: { id: existing.id }, data })
       : await prisma.lLMConfig.create({ data })
+
+    // ── TD-007: Write audit logs for sensitive field changes ──
+    const ipAddress = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? null
+    const userAgent = request.headers.get('user-agent') ?? null
+
+    // Helper to mask API key: show last 4 chars
+    const maskKey = (key: string | null | undefined) => {
+      if (!key) return null
+      return key.slice(0, 6) + '***' + key.slice(-4)
+    }
+
+    // Helper to write audit log entry
+    const writeAuditLog = async (action: string, field: string, oldVal: string | null, newVal: string | null) => {
+      await prisma.lLMConfigAuditLog.create({
+        data: {
+          actorId: user.id,
+          actorName: user.name || user.email || 'admin',
+          action,
+          field,
+          maskedValue: newVal ? maskKey(newVal) : null,
+          oldValue: oldVal ? maskKey(oldVal) : null,
+          newValue: newVal ? maskKey(newVal) : null,
+          ipAddress,
+          userAgent
+        }
+      })
+    }
+
+    // Compare and log changes
+    if (existing) {
+      if (apiKey && apiKey !== existing.apiKey) {
+        await writeAuditLog('UPDATE_KEY', 'apiKey', existing.apiKey, apiKey)
+      }
+      if (visionApiKey && visionApiKey !== existing.visionApiKey) {
+        await writeAuditLog('UPDATE_KEY', 'visionApiKey', existing.visionApiKey, visionApiKey)
+      }
+      if (apiUrl !== existing.apiUrl) {
+        await writeAuditLog('UPDATE_CONFIG', 'apiUrl', existing.apiUrl, apiUrl)
+      }
+      if (model !== existing.model) {
+        await writeAuditLog('UPDATE_CONFIG', 'model', existing.model, model)
+      }
+      if (visionApiUrl !== existing.visionApiUrl) {
+        await writeAuditLog('UPDATE_CONFIG', 'visionApiUrl', existing.visionApiUrl || '', visionApiUrl || '')
+      }
+      if (visionModel !== existing.visionModel) {
+        await writeAuditLog('UPDATE_CONFIG', 'visionModel', existing.visionModel || '', visionModel || '')
+      }
+    } else {
+      // New config created
+      await writeAuditLog('UPDATE_CONFIG', 'apiUrl', null, apiUrl)
+      if (apiKey) await writeAuditLog('UPDATE_KEY', 'apiKey', null, apiKey)
+    }
 
     return {
       id: config.id,

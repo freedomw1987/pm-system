@@ -118,7 +118,18 @@ const app = new Elysia()
 // Warm up cache at startup
 refreshAllRolePermissions().catch(console.error)
 
-console.log(`🚀 PM System API running at http://localhost:4000`)
-console.log(`📚 Swagger docs at http://localhost:4000/swagger`)
+// TD-010: Structured startup logs
+if (process.env.NODE_ENV === 'production' || process.env.JSON_LOGS === 'true') {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    event: 'SERVER_START',
+    url: 'http://localhost:4000',
+    docs: 'http://localhost:4000/swagger'
+  }))
+} else {
+  console.log(`🚀 PM System API running at http://localhost:4000`)
+  console.log(`📚 Swagger docs at http://localhost:4000/swagger`)
+}
 
 export { app }

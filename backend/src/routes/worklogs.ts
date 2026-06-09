@@ -2,6 +2,16 @@ import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
 
+// TD-009: Parse date string as UTC to ensure consistent storage regardless of server timezone
+// "2026-06-10" → "2026-06-10T00:00:00.000Z" (not server local midnight)
+const parseDateUTC = (dateStr: string): Date => {
+  const parts = dateStr.split('-').map(Number)
+  const year = parts[0]!
+  const month = parts[1]!
+  const day = parts[2]!
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
 const serializeWorkLog = (workLog: any) => ({
   ...workLog,
   workDate: workLog.date,
@@ -44,12 +54,12 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
       ]
     }
 
-    // Date range filter (support both date and workDate)
+    // Date range filter (TD-009: use UTC to match stored dates)
     const dateFilter: any = {}
-    if (query.startDate) dateFilter.gte = new Date(query.startDate)
+    if (query.startDate) dateFilter.gte = parseDateUTC(query.startDate)
     if (query.endDate) {
-      const endDate = new Date(query.endDate)
-      endDate.setHours(23, 59, 59, 999)
+      const endDate = parseDateUTC(query.endDate)
+      endDate.setUTCHours(23, 59, 59, 999)
       dateFilter.lte = endDate
     }
     if (Object.keys(dateFilter).length > 0) {
@@ -336,7 +346,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
         taskId,
         bugId,
         hours,
-        date: new Date(workDate),
+        date: parseDateUTC(workDate),
         description: note
       },
       include: {
@@ -406,7 +416,7 @@ const workLogRoutes = new Elysia({ prefix: '/worklogs' })
       where: { id: params.id },
       data: {
         hours,
-        date: workDate ? new Date(workDate) : undefined,
+        date: workDate ? parseDateUTC(workDate) : undefined,
         description: note
       },
       include: {

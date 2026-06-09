@@ -234,7 +234,12 @@
 - [x] 24 個新 unit test (7 RG-009 + 17 RG-010),守住:`cd backend && bun test` → 499 pass / 0 fail
 
 ### Backlog (P2)
-- [ ] TD-005, TD-006, TD-007, TD-009, TD-010
+- [ ] ~~TD-006 (Storybook)~~ — 跳過，internal tool 唔跨 project 重用 component，價值唔夠
+
+### Sprint 19 (P2 cleanup) — ✅ DONE (2026-06-10)
+- [x] **TD-007**: LLM API Key audit log — 新增 `LLMConfigAuditLog` table + `/api/llm-config/audit-logs` endpoint (Admin only) + PUT 時自動寫 audit log (masked key, actor, timestamp, IP/User-Agent)
+- [x] **TD-009**: WorkLog timezone 處理 — `parseDateUTC()` helper 用 `Date.UTC()` 統一存 UTC,filter query 也用 UTC
+- [x] **TD-010**: Logging aggregation — `logger.ts` 改為 JSON format (production) / human-readable (development),startup log 也是 JSON
 
 ### Sprint 18 (P0 + P1 cleanup) — ✅ DONE (2026-06-10)
 - [x] **TD-NEW-1**: Backend `/health` endpoint — 加 `GET /health` 返 `{status, db, uptime}` + docker-compose healthcheck 由 `/api/projects` (撞 401) 改 `/health` (200)。Backend container 終於 healthy。
@@ -269,3 +274,4 @@
 | 2026-06-09 | TD-008 進度更新 — 5 個 rate-limit unit test pass,RG-008 regression test 守住 |
 | 2026-06-09 | Sprint 5:TD-003 / TD-004 / TD-014 全部清,P0 debt 100% 清除;Dockerfile multi-stage(673→651MB,-3.3%);RBAC cache dead code 殘留清(RG-009);WS handler 抽純 helpers 17 unit test(RG-010);499/499 unit test pass;frontend `WorkLogsPage.tsx:413 await in forEach` pre-existing issue 阻 docker stack 起,E2E 留住下一步 fix |
 | 2026-06-09 | Sprint 5 closure 2:frontend build fix(async onClick + try/catch)+ Dockerfile 漏 COPY prisma.config.ts(RG-011,Prisma 7 strict config)+ prisma.config.ts 改用 `env()` helper;docker compose up -d OK,E2E 13/17 pass(4 個 rbac-negative 失敗因 rate-limit 5/60s 撞 manual + 11 login attempts,屬 E2E 設計問題非 code bug) |
+| 2026-06-10 | Sprint 19:TD-007 ✅(LLM API Key audit log + audit endpoint),TD-009 ✅(WorkLog timezone UTC),TD-010 ✅(JSON structured logging) |

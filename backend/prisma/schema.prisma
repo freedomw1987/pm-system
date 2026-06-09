@@ -85,6 +85,23 @@ model LLMConfig {
   @@map("llm_configs")
 }
 
+// TD-007: Audit log for LLM API Key changes
+model LLMConfigAuditLog {
+  id          String   @id @default(uuid())
+  actorId     String   @map("actor_id")           // admin user who made the change
+  actorName   String   @map("actor_name")
+  action      String                               // 'UPDATE_KEY' | 'REMOVE_KEY' | 'UPDATE_CONFIG'
+  field       String?                              // which field changed (apiKey, visionApiKey, etc.)
+  maskedValue String?  @map("masked_value")       // e.g. "sk-***" (last 4 chars)
+  oldValue    String?  @map("old_value")          // e.g. "sk-...abc" (null for new)
+  newValue    String?  @map("new_value")          // e.g. "sk-...xyz" (null for remove)
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  timestamp   DateTime @default(now())
+
+  @@map("llm_config_audit_logs")
+}
+
 model WikiPage {
   id         String   @id @default(uuid())
   projectId  String   @map("project_id")
