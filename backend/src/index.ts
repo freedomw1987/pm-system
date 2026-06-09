@@ -66,6 +66,23 @@ const app = new Elysia()
       // Let Elysia handle it, but we validate size in the route handler
     }
   })
+  // TD-NEW-1 (Sprint 18):/health endpoint —— public,unauthed,畀 docker
+  // healthcheck + load balancer probe 用。Ping DB(SELECT 1)確認唔係淨返 200
+  // 但 backend stuck 喺 prisma pool 滿。返 200 即 service alive + db reachable。
+  //
+  // 點解唔放 /api/health:/api/* group 全部用 authDerive,呢條會被 401。
+  // 紅線:健康 endpoint 必須 unauthed 否則 docker healthcheck 永遠 fail。
+  .get('/health', async () => {
+    try {
+      await prisma.$queryRaw`SELECT 1`
+      return { status: 'ok', db: 'ok', uptime: process.uptime() }
+    } catch (err) {
+      return new Response(
+        JSON.stringify({ status: 'degraded', db: 'fail', error: String(err) }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+  })
   // Auth derive apply 喺 app level,令 /auth/* 同 /api/* 都攞到 user
   // (extract 去 middleware/auth.ts — 2026-06-09 修 /auth/change-password 永遠 401)
   // 注意: Elysia 嘅 .derive() 只影響「之後」.use() 嘅 routes,所以要放喺
