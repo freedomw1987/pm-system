@@ -11,6 +11,7 @@ import AttachmentsTab from '../components/AttachmentsTab'
 import ProjectKanban from '../components/ProjectKanban'
 import ToggleMultiSelect from '../components/ToggleMultiSelect'
 import Pagination from '../components/Pagination'
+import AddTaskModal, { type MemberOption } from '../components/AddTaskModal'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -654,10 +655,8 @@ export default function ProjectDetailPage() {
   }
 
   // Derived lists for the task/bug modals (proj already has `project.members`; no extra fetch needed)
-  const assigneeOptions = project?.members?.map((m: ProjectMember) => (
-    <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
-  )) || []
-  const participantOptions = project?.members?.map((m: ProjectMember) => ({ id: m.user.id, name: m.user.name })) || []
+  const assigneeOptions: MemberOption[] = project?.members?.map((m: ProjectMember) => ({ id: m.user.id, name: m.user.name })) || []
+  const participantOptions: MemberOption[] = project?.members?.map((m: ProjectMember) => ({ id: m.user.id, name: m.user.name })) || []
 
   const roleLabel = (r: string) =>
     ({ pm: '項目經理', tech_lead: '技術主管', developer: '開發', tester: '測試' }[r] || r)
@@ -1071,17 +1070,20 @@ export default function ProjectDetailPage() {
 
       {/* Modals */}
       <AddTaskModal
-        showAddTaskModal={showAddTaskModal} setShowAddTaskModal={setShowAddTaskModal}
-        newTaskTitle={newTaskTitle} setNewTaskTitle={setNewTaskTitle}
-        newTaskDesc={newTaskDesc} setNewTaskDesc={setNewTaskDesc}
-        newTaskAssignee={newTaskAssignee} setNewTaskAssignee={setNewTaskAssignee}
-        newTaskParticipantIds={newTaskParticipantIds} setNewTaskParticipantIds={setNewTaskParticipantIds}
-        newTaskParentId={newTaskParentId} setNewTaskParentId={setNewTaskParentId}
-        isAddingTask={isAddingTask} handleAddTask={handleAddTask}
-        tasks={tasks}
+        open={showAddTaskModal}
+        onClose={() => setShowAddTaskModal(false)}
+        title={newTaskTitle} setTitle={setNewTaskTitle}
+        description={newTaskDesc} setDescription={setNewTaskDesc}
+        assigneeId={newTaskAssignee} setAssigneeId={setNewTaskAssignee}
+        participantIds={newTaskParticipantIds} setParticipantIds={setNewTaskParticipantIds}
+        parentTaskId={newTaskParentId} setParentTaskId={setNewTaskParentId}
         autoAssignAgent={autoAssignAgent} setAutoAssignAgent={setAutoAssignAgent}
         recommendedAgent={recommendedAgent}
-        assigneeOptions={assigneeOptions} participantOptions={participantOptions}
+        assigneeOptions={assigneeOptions}
+        participantOptions={participantOptions}
+        parentTaskOptions={tasks}
+        isSubmitting={isAddingTask}
+        onSubmit={handleAddTask}
       />
       <AddBugModal
         showAddBugModal={showAddBugModal} setShowAddBugModal={setShowAddBugModal}
@@ -1602,113 +1604,6 @@ function AgentTasksList({ projectId }: { projectId: string }) {
   )
 }
 
-// ── Add Task Modal ──────────────────────────────────────────────────────
-function AddTaskModal({ showAddTaskModal, setShowAddTaskModal, newTaskTitle, setNewTaskTitle, newTaskDesc, setNewTaskDesc, newTaskAssignee, setNewTaskAssignee, newTaskParticipantIds, setNewTaskParticipantIds, newTaskParentId, setNewTaskParentId, isAddingTask, handleAddTask, project, tasks, autoAssignAgent, setAutoAssignAgent, recommendedAgent, assigneeOptions, participantOptions }: any) {
-  if (!showAddTaskModal) return null
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">新建任務</h2>
-          <button onClick={() => setShowAddTaskModal(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-        </div>
-        <form onSubmit={handleAddTask} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-            <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="input-field w-full" placeholder="輸入任務標題" required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-            <RichTextEditor value={newTaskDesc} onChange={setNewTaskDesc} placeholder="輸入任務描述" rows={6} />
-          </div>
-
-          {/* Smart Assignment */}
-          <div className="bg-blue-50 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Bot className="w-5 h-5 text-blue-600" />
-                <span className="font-medium text-gray-900">智能分配</span>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoAssignAgent}
-                  onChange={(e) => {
-                    setAutoAssignAgent(e.target.checked)
-                    if (e.target.checked && recommendedAgent) {
-                      setNewTaskAssignee(recommendedAgent.id)
-                    } else if (!e.target.checked) {
-                      setNewTaskAssignee('')
-                    }
-                  }}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
-
-            {recommendedAgent ? (
-              <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-blue-200">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900">{recommendedAgent.name}</p>
-                  <p className="text-sm text-gray-500">
-                    匹配技能：
-                    {recommendedAgent.skills.map((s: string) => (
-                      <span key={s} className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{s}</span>
-                    ))}
-                  </p>
-                </div>
-                {autoAssignAgent && (
-                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">將自動分配</span>
-                )}
-              </div>
-            ) : newTaskTitle.length >= 3 ? (
-              <p className="text-sm text-gray-500">正在分析任務內容...</p>
-            ) : (
-              <p className="text-sm text-gray-400">輸入任務標題以獲取推薦</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-            <select value={newTaskAssignee} onChange={(e) => setNewTaskAssignee(e.target.value)} className="input-field w-full">
-              <option value="">-- 不指定 --</option>
-              {assigneeOptions}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
-            <ToggleMultiSelect
-              options={participantOptions}
-              value={newTaskParticipantIds}
-              onChange={setNewTaskParticipantIds}
-              className="w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
-            <select value={newTaskParentId} onChange={(e) => setNewTaskParentId(e.target.value)} className="input-field w-full">
-              <option value="">无父任务</option>
-              {tasks?.map((task: Task) => (
-                <option key={task.id} value={task.id}>{task.title}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-3 justify-end pt-2">
-            <button type="button" onClick={() => setShowAddTaskModal(false)} className="btn-secondary">取消</button>
-            <button type="submit" disabled={isAddingTask} className="btn-primary">
-              {isAddingTask ? '建立中...' : '建立任務'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
 // ── Add Bug Modal ──────────────────────────────────────────────────────
 function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewBugTitle, newBugDesc, setNewBugDesc, newBugSeverity, setNewBugSeverity, newBugAssignee, setNewBugAssignee, isAddingBug, handleAddBug, assigneeOptions }: any) {
   if (!showAddBugModal) return null
@@ -1741,7 +1636,9 @@ function AddBugModal({ showAddBugModal, setShowAddBugModal, newBugTitle, setNewB
             <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
             <select value={newBugAssignee} onChange={(e) => setNewBugAssignee(e.target.value)} className="input-field w-full">
               <option value="">-- 不指定 --</option>
-              {assigneeOptions}
+              {assigneeOptions.map((m: MemberOption) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
             </select>
           </div>
           <div className="flex gap-3 justify-end pt-2">
@@ -1789,7 +1686,9 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
               <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
               <select value={editTaskAssignee} onChange={(e) => setEditTaskAssignee(e.target.value)} className="input-field w-full">
                 <option value="">-- 不指定 --</option>
-                {assigneeOptions}
+                {assigneeOptions.map((m: MemberOption) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -1867,7 +1766,9 @@ function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle
               <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
               <select value={editBugAssignee} onChange={(e) => setEditBugAssignee(e.target.value)} className="input-field w-full">
                 <option value="">-- 不指定 --</option>
-                {assigneeOptions}
+                {assigneeOptions.map((m: MemberOption) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
               </select>
             </div>
           </div>

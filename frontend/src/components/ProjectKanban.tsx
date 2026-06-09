@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Plus, Grip, Bot, User, X } from 'lucide-react'
+import type { FormEvent } from 'react'
+import { Plus, Grip, Bot, User } from 'lucide-react'
 import { requirementApi, taskApi, projectApi } from '../utils/api'
 import type { Requirement, Task } from '../types'
+import AddTaskModal, { type RecommendedAgent, type MemberOption } from './AddTaskModal'
 
 interface ProjectKanbanProps {
   projectId: string
@@ -23,7 +25,7 @@ interface RequirementColumn {
   }
 }
 
-interface MemberOption {
+interface MemberWithEmail {
   id: string
   name: string
   email: string
@@ -39,12 +41,76 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskDesc, setNewTaskDesc] = useState('')
   const [newTaskAssignee, setNewTaskAssignee] = useState('')
-  const [members, setMembers] = useState<MemberOption[]>([])
+  const [newTaskParticipantIds, setNewTaskParticipantIds] = useState<string[]>([])
+  const [newTaskParentId, setNewTaskParentId] = useState('')
+  const [autoAssignAgent, setAutoAssignAgent] = useState(true)
+  const [recommendedAgent, setRecommendedAgent] = useState<RecommendedAgent | null>(null)
+  const [members, setMembers] = useState<MemberWithEmail[]>([])
+  const [allTasks, setAllTasks] = useState<Task[]>([])
   const [isAddingTask, setIsAddingTask] = useState(false)
 
   useEffect(() => {
     loadData()
   }, [projectId])
+
+  // Get recommendation when task title changes (smart-assign panel, mirrors ProjectDetailPage)
+  useEffect(() => {
+    if (newTaskTitle.trim() && newTaskTitle.length >= 3) {
+      const timer = setTimeout(async () => {
+        try {
+          const agentsResponse = await taskApi.getAgentsOverview()
+          const agents = agentsResponse.data.agents || []
+          const keywords = (newTaskTitle + ' ' + newTaskDesc).toLowerCase().match(/\w{2,}/g) || []
+
+          const skillKeywords: Record<string, string[]> = {
+            code_review: ['代碼審查', 'code review', 'review', 'pull request', 'pr', '審視', '審核'],
+            testing: ['測試', 'test', 'unit test', '測試用例', '自動化'],
+            documentation: ['文檔', 'docs', 'readme', 'wiki', '手冊'],
+            bug_analysis: ['bug', 'bug分析', '錯誤', '除錯', 'debug', '問題', '修復'],
+            refactoring: ['重構', 'refactor', '優化'],
+            security_audit: ['安全', 'security', '漏洞', '審計'],
+            performance: ['性能', '效能', '優化', 'slow'],
+            design: ['設計', '架構', 'architecture', '系統設計']
+          }
+
+          let bestAgent: typeof agents[0] | null = null
+          let bestScore = 0
+          let matchedSkills: string[] = []
+
+          for (const agent of agents) {
+            if (agent.activeTasks >= agent.maxConcurrentTasks) continue
+            const score = (agent.skills || []).filter((skill: string) => {
+              const kws = skillKeywords[skill] || []
+              return keywords.some((kw: string) => kws.some((k: string) => k.includes(kw) || kw.includes(k)))
+            }).length
+
+            if (score > bestScore) {
+              bestScore = score
+              bestAgent = agent
+              matchedSkills = (agent.skills || []).filter((skill: string) => {
+                const kws = skillKeywords[skill] || []
+                return keywords.some((kw: string) => kws.some((k: string) => k.includes(kw) || kw.includes(k)))
+              })
+            }
+          }
+
+          if (bestAgent && bestScore > 0) {
+            setRecommendedAgent({ id: bestAgent.id, name: bestAgent.name, skills: matchedSkills })
+            if (autoAssignAgent) {
+              setNewTaskAssignee(bestAgent.id)
+            }
+          } else {
+            setRecommendedAgent(null)
+          }
+        } catch (err) {
+          console.error('Failed to get recommendation:', err)
+        }
+      }, 500)
+      return () => clearTimeout(timer)
+    } else {
+      setRecommendedAgent(null)
+    }
+  }, [newTaskTitle, newTaskDesc])
 
   const loadData = async () => {
     try {
@@ -63,6 +129,7 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
       const membersData = membersResponse.data.members || []
 
       setMembers(membersData.map((m: any) => ({ id: m.user.id, name: m.user.name, email: m.user.email })))
+      setAllTasks(tasks)
 
       // Group tasks by requirement and status
       const columnsData: RequirementColumn[] = requirements.map((req: Requirement) => ({
@@ -152,22 +219,40 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
     setDraggedTask(null)
   }
 
-  const handleAddTask = async () => {
+  const handleAddTask = async (e: FormEvent) => {
+    e.preventDefault()
     if (!newTaskTitle.trim() || !selectedRequirement) return
 
+    setIsAddingTask(true)
     try {
-      setIsAddingTask(true)
-      await taskApi.create({
+      const result = await taskApi.create({
         title: newTaskTitle,
         description: newTaskDesc || undefined,
         assigneeId: newTaskAssignee || undefined,
+        participantIds: newTaskParticipantIds,
+        parentTaskId: newTaskParentId || undefined,
         requirementIds: [selectedRequirement],
         projectId
       })
+
+      const taskId = result.data.task?.id
+
+      // Auto-assign to recommended agent if enabled and we have a task ID
+      if (autoAssignAgent && taskId && recommendedAgent) {
+        try {
+          await taskApi.autoAssign(taskId)
+        } catch (autoErr) {
+          console.error('Auto-assign failed:', autoErr)
+        }
+      }
+
       setNewTaskTitle('')
       setNewTaskDesc('')
       setNewTaskAssignee('')
+      setNewTaskParticipantIds([])
+      setNewTaskParentId('')
       setSelectedRequirement(null)
+      setRecommendedAgent(null)
       setShowAddTaskModal(false)
       loadData()
     } catch (err) {
@@ -179,6 +264,12 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
 
   const openAddTaskModal = (reqId: string) => {
     setSelectedRequirement(reqId)
+    setNewTaskTitle('')
+    setNewTaskDesc('')
+    setNewTaskAssignee('')
+    setNewTaskParticipantIds([])
+    setNewTaskParentId('')
+    setRecommendedAgent(null)
     setShowAddTaskModal(true)
   }
 
@@ -318,76 +409,38 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
         )}
       </div>
 
-      {/* Add Task Modal */}
-      {showAddTaskModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">新建任務</h2>
-              <button onClick={() => setShowAddTaskModal(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); handleAddTask() }} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-                <input
-                  type="text"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="輸入任務標題"
-                  required
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <textarea
-                  value={newTaskDesc}
-                  onChange={(e) => setNewTaskDesc(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="輸入任務描述"
-                  rows={4}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-                <select
-                  value={newTaskAssignee}
-                  onChange={(e) => setNewTaskAssignee(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">-- 不指定 --</option>
-                  {members.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddTaskModal(false)
-                    setNewTaskTitle('')
-                    setNewTaskDesc('')
-                    setNewTaskAssignee('')
-                    setSelectedRequirement(null)
-                  }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newTaskTitle.trim() || isAddingTask}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {isAddingTask ? '建立中...' : '建立任務'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Add Task Modal — unified with ProjectDetailPage's Add Task Tab */}
+      <AddTaskModal
+        open={showAddTaskModal}
+        onClose={() => {
+          setShowAddTaskModal(false)
+          setNewTaskTitle('')
+          setNewTaskDesc('')
+          setNewTaskAssignee('')
+          setNewTaskParticipantIds([])
+          setNewTaskParentId('')
+          setSelectedRequirement(null)
+          setRecommendedAgent(null)
+        }}
+        title={newTaskTitle}
+        setTitle={setNewTaskTitle}
+        description={newTaskDesc}
+        setDescription={setNewTaskDesc}
+        assigneeId={newTaskAssignee}
+        setAssigneeId={setNewTaskAssignee}
+        participantIds={newTaskParticipantIds}
+        setParticipantIds={setNewTaskParticipantIds}
+        parentTaskId={newTaskParentId}
+        setParentTaskId={setNewTaskParentId}
+        autoAssignAgent={autoAssignAgent}
+        setAutoAssignAgent={setAutoAssignAgent}
+        recommendedAgent={recommendedAgent}
+        assigneeOptions={members.map((m): MemberOption => ({ id: m.id, name: m.name }))}
+        participantOptions={members.map((m): MemberOption => ({ id: m.id, name: m.name }))}
+        parentTaskOptions={allTasks.map((t) => ({ id: t.id, title: t.title }))}
+        isSubmitting={isAddingTask}
+        onSubmit={handleAddTask}
+      />
     </div>
   )
 }
