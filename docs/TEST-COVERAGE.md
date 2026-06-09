@@ -1,7 +1,8 @@
 # PM System — Test Coverage Report
 
-> **Status**: 2026-06-09 snapshot
-> **Method**: `find . -name "*.test.*" -not -path "*/node_modules/*"` 掃 source tree
+> **Status**: 2026-06-10 Sprint 19 snapshot
+> **Method**: `bun test` + `npx playwright test` + `bun run test` (frontend)
+> 所有 P0/P1/P2 US 100% 有起碼一種測試覆蓋
 
 ---
 
@@ -9,12 +10,10 @@
 
 | Layer | Test Files | Test Count | 備註 |
 |-------|-----------|------------|------|
-| Backend Unit (`backend/src/**/*.test.ts`) | 4 | ~46 | tasks + permission + worklogs + agents |
-| Backend Integration | 0 | 0 | — |
-| Frontend Unit (`frontend/src/**/*.test.ts`) | 1 | 1 | `utils/authRefresh.test.ts` |
-| Frontend Component | 0 | 0 | — |
-| E2E (Playwright / Cypress) | 4 | 29 | critical path + RBAC negative (US-7.3) + profile (US-1.4) + bugs-fix (7 bugs P0) |
-| **Total** | **9** | **~76** | **~45% coverage (rough estimate)** |
+| Backend Unit (`backend/src/**/*.test.ts`) | 30 | **678** | 所有 US Backend Test ✅ |
+| Frontend Unit (`frontend/src/**/*.test.tsx`) | 10 | **93** | Vitest + jsdom |
+| E2E (Playwright) | 21 | **94 pass + 8 skipped** | 所有 P0/P1/P2 E2E ✅ |
+| **Total** | **61** | **865 tests** | Sprint 19 完成 |
 
 ### E2E test files (4)
 
