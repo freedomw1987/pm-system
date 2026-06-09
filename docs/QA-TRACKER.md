@@ -1,6 +1,7 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
 > **Status**: 🟢 2026-06-10 — Sprint 10 進行中,P0 remaining US test push(US-6.4 已 PASS-UNIT)
+> **Update**: 2026-06-09 收工 — Retro Sprint 11 follow-up registration:US-5.6 E2E DRAFT T15a (ProjectDetailPage bug tab create + rich text + image paste) + T15b (search filter) Sprint 11 planned;US-10.3 NONE-HOLD — client-side title search done,full-text search hold 等下個 epic 決定(tsvector / MeiliSearch)
 > **Update**: 2026-06-10 Sprint 10 — US-6.4 worklogs filter RBAC 由 NONE → PASS-UNIT(9 個 test,non-admin 強制 userId + admin departmentId gate),Unit 549→558(+9)
 > **Rule**: 改 PRD 必更新本檔(紅線 11)
 
@@ -41,7 +42,7 @@
 | US-5.3 | MyBugs | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.4 | 改狀態 | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.5 | 全部缺陷列表 + 詳情 | ❌(新 GET /:id) | ❌ | ❌(DEPRECATED 2026-06-09 — 拎走 standalone `/bugs` page) | **DEPRECATED** ⚫ | TBD |
-| US-5.6 | Bug 描述 rich text + image paste | ❌ | ❌ | ❌(DEPRECATED 2026-06-09 — 拎走 `/bugs` 個獨立 create entry,ProjectDetailPage 嗰度 create flow 等下次 sprint 補 E2E) | **PARTIAL** 🟡 | TBD |
+| US-5.6 | Bug 描述 rich text + image paste | ❌ | ❌ | ❌(**DRAFT T15a + T15b**, Sprint 11 planned — `ProjectDetailPage` bug tab create + rich text + image paste + search filter 全部要補 E2E;舊 `CreateBugModal` 5 tests 2026-06-09 skip) | **PARTIAL** 🟡 | TBD |
 | **Epic 6: WorkLogs** | | | | | | |
 | US-6.1 | 填工時 | ✅ worklogs-create.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 5: 27 tests — serializeWorkLog + formatDateKey + getWeekKey + validateWorkLogCreateInput + 5號 lock) | TBD |
 | US-6.2 | 分頁列表 | ✅ worklogs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
@@ -69,7 +70,7 @@
 | **Epic 10: Wiki** | | | | | | |
 | US-10.1 | 建頁 | ✅ wikis.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-10.2 | 編輯 | ✅ wikis.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-10.3 | 搜尋 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-10.3 | 搜尋 | ❌ | ❌ | ❌ | **NONE-HOLD** 🟠 (Sprint 11: client-side title search done in `WikiTab`;**full-text search hold** — 需要 Postgres `tsvector` GIN index 或 MeiliSearch sidecar,scope 較大,留俾下個 epic 決定 — 紅線 12 唔適用,P1 非關鍵) | TBD |
 | US-10.4 | Agent 生 Wiki | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 11: Reports** | | | | | | |
 | US-11.1 | 進度 | ✅ reports.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 9: 4-option bug status enum + 4 status bucket + percent math) | TBD |
@@ -98,6 +99,16 @@
 | E2E tests | **52 pass + 1 new draft** (Sprint 10: project-kanban.spec.ts 6 tests added,5 跑得起 1 drag-drop skip placeholder,等 sprint 11 補 — spec TypeScript clean) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
+
+### 🟠 Open follow-ups(Sprint 11 / 12 planned,non-P0)
+
+| ID | US | Owner | Status |
+|----|----|----|--------|
+| **T15a** | E2E test — `ProjectDetailPage` bug tab create + rich text + image paste (覆 US-5.6 嘅 ProjectDetailPage 入口) | TBD | DRAFT, Sprint 11 |
+| **T15b** | E2E test — `ProjectDetailPage` bug tab search filter (server-side status / severity 過濾 + reset page 1) | TBD | DRAFT, Sprint 11 |
+| **US-10.3 full-text** | Wiki full-text search (over content, not just title) | TBD | **HOLD** — scope 較大,需要 Postgres `tsvector` GIN index 或 MeiliSearch sidecar,留俾下個 epic 決定。P1 非關鍵,紅線 12 唔適用。Sprint 11 client-side title search 已 done (`WikiTab`) |
+| **refactor** | 抽共享 `<EntitySubListSection>` (ProjectDetailPage + RequirementDetailPage ~95% 一樣 sub-list code) | TBD | DEFERRED,1-2 日 refactor |
+| **refactor** | `CreateBugModal.tsx` 對齊新 `<AddBugModal>` pattern — 三個 divergent bug-creation surface | TBD | DEFERRED |
 
 🟢🟢 **8 個 P0 US 雙綠**(Sprint 8: 7 個) — Sprint 9 +US-11.2(工時 / 成本報告)由 NONE → 雙綠。
 🟢 **22 個 P0 US PASS-UNIT** — Sprint 9 +US-11.1(進度報告)由 NONE → PASS-UNIT。
