@@ -288,8 +288,12 @@ test.describe('Sprint 8 — Server-side Pagination', () => {
     await expect(page.getByRole('button', { name: '上一頁' })).toBeDisabled()
   })
 
-  // ─── T8: BugsPage status filter 觸發 server reload + page 1 ─────
-  test('BugsPage: switching status filter triggers a server reload', async ({ page }, testInfo) => {
+  // ─── T8: BugsPage status filter 觸發 server reload + page 1 — DEPRECATED 2026-06-09
+  // David 拎走「全部缺陷」standalone page(`/bugs` route 刪除)。改去 MyBugsPage
+  // 嘅 server-side status filter 仍然 work,但呢個 test 嘅 entry 經已廢。
+  // 跟住 ProjectDetailPage 嗰度嘅 bug tab 仍然有 status filter(server-side),
+  // 等下次 sprint 補 regression test。
+  test.skip('BugsPage: switching status filter triggers a server reload (DEPRECATED 2026-06-09)', async ({ page }, testInfo) => {
     const token = await apiLogin(page.request, testInfo.title)
     await loginViaStorage(page, token)
 

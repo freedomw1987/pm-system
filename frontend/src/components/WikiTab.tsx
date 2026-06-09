@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, FileText, Edit2, Trash2, BookOpen, Upload, CheckCircle, AlertCircle, X } from 'lucide-react'
+import { Plus, FileText, Edit2, Trash2, BookOpen, Upload, CheckCircle, AlertCircle, X, Search } from 'lucide-react'
 import { wikiApi, documentApi } from '../utils/api'
 import WikiEditor from './WikiEditor'
 
@@ -32,6 +32,15 @@ export default function WikiTab({ projectId }: WikiTabProps) {
   const [batchResults, setBatchResults] = useState<any[]>([])
 
   useEffect(() => { loadPages() }, [projectId])
+
+  // Search box (client-side filter, 2026-06-09 David feedback C 延伸)
+  // Filter by title (case-insensitive contains).
+  const [searchWiki, setSearchWiki] = useState('')
+  const filteredPages = useMemo(() => {
+    const q = searchWiki.trim().toLowerCase()
+    if (!q) return pages
+    return pages.filter(p => p.title.toLowerCase().includes(q))
+  }, [pages, searchWiki])
 
   const loadPages = async () => {
     setIsLoading(true)
@@ -215,7 +224,7 @@ export default function WikiTab({ projectId }: WikiTabProps) {
     <div className="flex gap-6 h-full" style={{ height: 'calc(100vh - 280px)' }}>
       {/* Left sidebar - page list */}
       <div className="w-72 flex flex-col">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-900">頁面列表</h3>
           <div className="flex items-center gap-1">
             <button
@@ -235,6 +244,19 @@ export default function WikiTab({ projectId }: WikiTabProps) {
           </div>
         </div>
 
+        {/* Search box (2026-06-09) */}
+        <div className="relative mb-3">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchWiki}
+            onChange={(e) => setSearchWiki(e.target.value)}
+            placeholder="搜尋頁面..."
+            aria-label="搜尋 Wiki 頁面"
+            className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary-500" />
@@ -250,9 +272,15 @@ export default function WikiTab({ projectId }: WikiTabProps) {
               建立第一頁
             </button>
           </div>
+        ) : filteredPages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+            <Search size={28} className="text-gray-400 mb-2" />
+            <p className="text-sm text-gray-500">無符合「{searchWiki}」嘅頁面</p>
+            <p className="text-xs text-gray-400 mt-1">試下其他關鍵字,或清空搜尋框</p>
+          </div>
         ) : (
           <div className="flex-1 overflow-auto space-y-1">
-            {pages.map((page) => (
+            {filteredPages.map((page) => (
               <div
                 key={page.id}
                 className={`group flex items-start gap-2 p-3 rounded-lg cursor-pointer transition-colors ${

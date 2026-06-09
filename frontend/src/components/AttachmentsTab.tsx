@@ -10,8 +10,8 @@
  *     + 用 fetch 拉一次 blob 再 trigger download,避免瀏覽器直接
  *       navigate 嘅 URL 丟失 Authorization header 嘅問題
  */
-import { useEffect, useState, useRef } from 'react'
-import { Upload, FileText, Image as ImageIcon, File, Trash2, Download, Paperclip, X } from 'lucide-react'
+import { useEffect, useMemo, useState, useRef } from 'react'
+import { Upload, FileText, Image as ImageIcon, File, Trash2, Download, Paperclip, X, Search } from 'lucide-react'
 import { attachmentApi } from '../utils/api'
 
 interface Attachment {
@@ -43,6 +43,15 @@ export default function AttachmentsTab({ projectId, canUpload = true }: Attachme
   useEffect(() => {
     loadAttachments()
   }, [projectId])
+
+  // Search box (client-side filter, 2026-06-09 David feedback C 延伸)
+  // Filter by filename (case-insensitive contains).
+  const [searchAtt, setSearchAtt] = useState('')
+  const filteredAttachments = useMemo(() => {
+    const q = searchAtt.trim().toLowerCase()
+    if (!q) return attachments
+    return attachments.filter(a => a.filename.toLowerCase().includes(q))
+  }, [attachments, searchAtt])
 
   const loadAttachments = async () => {
     try {
@@ -150,27 +159,40 @@ export default function AttachmentsTab({ projectId, canUpload = true }: Attachme
 
   return (
     <div>
-      {/* Upload bar */}
-      {canUpload && (
-        <div className="mb-6 flex items-center gap-4">
+      {/* Upload bar + search box */}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {canUpload && (
+          <div className="flex items-center gap-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+              id="attachment-upload"
+            />
+            <label
+              htmlFor="attachment-upload"
+              className="btn-primary flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Upload size={18} />
+              {uploading ? '上傳中...' : '上傳附件'}
+            </label>
+            <span className="text-sm text-gray-500">支援圖片、文檔、壓縮包等格式</span>
+          </div>
+        )}
+        <div className="relative w-full sm:w-72 sm:ml-auto">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={handleFileSelect}
-            className="hidden"
-            id="attachment-upload"
+            type="text"
+            value={searchAtt}
+            onChange={(e) => setSearchAtt(e.target.value)}
+            placeholder="搜尋附件..."
+            aria-label="搜尋附件"
+            className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
-          <label
-            htmlFor="attachment-upload"
-            className="btn-primary flex items-center gap-2 cursor-pointer disabled:opacity-50"
-          >
-            <Upload size={18} />
-            {uploading ? '上傳中...' : '上傳附件'}
-          </label>
-          <span className="text-sm text-gray-500">支援圖片、文檔、壓縮包等格式</span>
         </div>
-      )}
+      </div>
 
       {/* Attachment grid */}
       {attachments.length === 0 ? (
@@ -179,9 +201,15 @@ export default function AttachmentsTab({ projectId, canUpload = true }: Attachme
           <h3 className="text-lg font-medium text-gray-900 mb-2">暫無附件</h3>
           <p className="text-gray-500">上傳圖片或文件，方便項目成員下載使用</p>
         </div>
+      ) : filteredAttachments.length === 0 ? (
+        <div className="card p-12 text-center">
+          <Search size={48} className="mx-auto text-gray-400 mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">無符合「{searchAtt}」嘅附件</h3>
+          <p className="text-gray-500">試下其他關鍵字,或清空搜尋框</p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {attachments.map((att) => {
+          {filteredAttachments.map((att) => {
             const isImage = att.mimeType.startsWith('image/')
             return (
               <div key={att.id} className="card p-4 hover:shadow-md transition-shadow group">

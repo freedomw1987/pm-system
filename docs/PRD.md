@@ -96,6 +96,8 @@
 | US-5.2 | 作為 Tester,我可以將 Bug 分派畀 developer | P0 | DONE |
 | US-5.3 | 作為 Developer,我可以睇「我的 Bug」(MyBugs) | P0 | DONE |
 | US-5.4 | 作為 Tester,我可以更新 Bug 狀態(open / fixed / verified / closed) | P0 | DONE |
+| ~~US-5.5~~ | ~~作為 PM,我可以睇「全部缺陷」列表 + 詳情(/bugs standalone page)~~ | ~~P0~~ | ❌ **DEPRECATED 2026-06-09** (David 拎走 `/bugs` standalone page,只保留「我的缺陷」+ 項目/需求內頁 bug tab 入口) |
+| US-5.6 | Bug 描述支援 rich text + image paste | P1 | DONE (Backend + BugDetailPage 嘅 RichTextEditor;E2E 暫時 PARTIAL,等 ProjectDetailPage 補 test) |
 
 ### Epic 6: 工時記錄 (WorkLogs)
 
