@@ -484,3 +484,71 @@ describe('RG-XXX: <bug 簡述>', () => {
   - `backend/src/routes/tasks.ts` 拎出 `canEditTaskFields` 純 function + PUT /:id RBAC gate 結構重寫
   - `backend/src/routes/tasks.test.ts` 加 9 個 unit test
   - `e2e/tests/bugs-fix.spec.ts` `getSampleProjectId` helper 順手 patch(Sprint 8+ docker entrypoint 冇咗「範例」seed)— RG-015 唔直接 fix,但係同一個 Sprint 13 嘅 follow-up,3 個 spec bug 同時修
+
+### RG-016: ProjectKanban handleAddTask 簽名漏 FormEvent 參數 — 2026-06-10 Sprint 17 unify 撞到
+
+- **發現日期**: 2026-06-10(Sprint 17 unify Add Task modal 時 refactor 揭發)
+- **Scope**: ProjectKanban 嘅 form submit。原本 inline modal 邊度都 work(因為 inline `<form onSubmit={(e) => { e.preventDefault(); handleAddTask() }}>` 喺 wrapper 入面 swallow 咗個 event),改用共用 `<AddTaskModal onSubmit={handleAddTask}>` 之後即時暴露
+- **Symptom**:
+  - Refactor 之前 inline form `onSubmit={(e) => { e.preventDefault(); handleAddTask() }}` — wrapper 形式 swallow event,handleAddTask 接收 0 args 行得通
+  - Refactor 改用共用 component `<AddTaskModal onSubmit={handleAddTask} />`,而 `AddTaskModal` 內 `<form onSubmit={onSubmit}>` 直接 forward `FormEvent`
+  - 如果 `handleAddTask` 簽名仍然係 `async () => {...}`,**個 FormEvent 會傳入但 callee 唔做 `e.preventDefault()`** → form 觸發 native submit → browser navigate 走 → modal "消失" / page reload,user 以為 task 冇 create(實際上 race 一半)
+- **Root cause**:Inline form wrapper pattern(`onSubmit={(e) => { e.preventDefault(); fn() }}`)隱藏咗 callee 嘅 contract — `fn` 唔知道有 FormEvent。將 form submission 嘅責任由 wrapper closure 轉去共用 component 時,callee signature 冇相應修改 = silent contract break。TypeScript strict mode 應該 catch(`onSubmit: (e: FormEvent) => void` vs `() => Promise<void>` 唔配),但 Sprint 17 嘅 vite/tsc 環境冇 enforce strict function arg arity check
+- **Fix**(commit `f6f3674` 內):
+  ```ts
+  // before
+  const handleAddTask = async () => { ... }
+  // after
+  const handleAddTask = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!newTaskTitle.trim() || !selectedRequirement) return
+    ...
+  }
+  // call site:
+  <AddTaskModal onSubmit={handleAddTask} />  // 直接 bind,event 自動 forward
+  ```
+- **Prevention**:
+  - **共用 form component 嘅 onSubmit prop 應該明確標 `(e: FormEvent) => void | Promise<void>` type**,callee 強制要 accept event(`AddTaskModal.tsx:46` 已係 `onSubmit: (e: React.FormEvent) => void`)
+  - **避免 `<form onSubmit={(e) => { e.preventDefault(); fn() }}>` wrapper closure pattern**,直接 bind callee + callee 自己 preventDefault — 邏輯集中,refactor 唔會 silent break
+  - Frontend `tsconfig.json` 應該開 `"strictFunctionTypes": true`(目前 PM System frontend 用 vite default,arg arity widening 仲存在)→ 入 TECH-DEBT TD-?
+- **Regression test**: ✅ **2026-06-10 加**:
+  - **E2E**:`e2e/tests/add-task-modal-rg.spec.ts`(Sprint 17 新)RG-016 test:Kanban 入口開 modal → fill 標題 → submit → assert(a) `prevent default` URL 冇變(`page.url()` 仍 `/projects/:id`)+(b) modal 自動關 + task 出現喺 list → 確保 submit 行得通冇 navigate 走
+  - **Set-diff guard**:`add-task-modal-unified.spec.ts` T3 set-diff(Sprint 17 既有)順手守住 — 如果 callee signature drift 到 modal 唔開 / 唔關,11 個 visibility snapshot 即 fail
+- **Ref**:
+  - `frontend/src/components/ProjectKanban.tsx` `handleAddTask` 簽名 `() => ` → `(e: FormEvent) => `
+  - `frontend/src/components/AddTaskModal.tsx:46` `onSubmit: (e: React.FormEvent) => void`(共用 component 嘅 contract)
+  - Sprint 17 commit `f6f3674` (frontend refactor) + commit b869fa5 (unified spec) + **本 sprint 補 add-task-modal-rg.spec.ts**
+
+### RG-017: assigneeOptions type 由 JSX.Element[] 過共用 component contract — 2026-06-10 Sprint 17 unify 撞到
+
+- **發現日期**: 2026-06-10(Sprint 17 同 RG-016 一齊撞)
+- **Scope**: ProjectDetailPage 嘅 Tasks tab + Bugs tab 嘅 Add modal。原本 inline `<select>{assigneeOptions}</select>` 嘅 spread render JSX 行得通,改用共用 `<AddTaskModal assigneeOptions={...} />` 嗰陣 contract break
+- **Symptom**:
+  - 原 inline 寫法:`const assigneeOptions = project?.members?.map(m => <option key={m.user.id} value={m.user.id}>{m.user.name}</option>) || []`(`JSX.Element[]`)
+  - Inline `<select><option value="">-- 不指定 --</option>{assigneeOptions}</select>` — JSX 直接 spread 入 children,React 認得 element 數組,render OK
+  - 改用共用 `<AddTaskModal assigneeOptions={assigneeOptions} />`,內部 `assigneeOptions.map(m => <option key={m.id} value={m.id}>{m.name}</option>)` — **但 JSX.Element[] 冇 `.id` / `.name` field**,access undefined → render 空 select / TS error / 甚至 runtime crash(`undefined` value 入 `<option value={undefined}>`)
+- **Root cause**:**Inline UI 同 reusable component 對 data 嘅 contract 唔同**。Inline UI 直接畀「畫好嘅 JSX」做 children,reusable component 要「未畫嘅 data」自己 render。Tech-debt 角度:呢個 pattern(`.map(() => <JSX>)` 入 state)係 **「將 view 嘢 cache 入 derived state」嘅 anti-pattern** — 一旦 data 要 reuse(例如 unified component 入面 render 兩次),JSX cache 就鎖死 view 嘅 shape,callers 改唔到
+- **Fix**(commit `f6f3674` 內):
+  ```ts
+  // before
+  const assigneeOptions = project?.members?.map((m) => (
+    <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+  )) || []
+  // after  
+  const assigneeOptions: MemberOption[] = project?.members?.map(
+    (m) => ({ id: m.user.id, name: m.user.name })
+  ) || []
+  const participantOptions: MemberOption[] = ...  // 一樣 data shape
+  ```
+  - 3 個 local-helper modal(`AddBug` / `EditTask` / `EditBug` 喺 ProjectDetailPage 入面 inline)都跟住 `.map((m) => <option key={m.id} ...>)` 自己 render JSX(冇再依賴 `assigneeOptions` JSX cache)
+- **Prevention**:
+  - **Derived state 應該係 data 唔係 JSX**。`useMemo` / inline derive 都 only output `{id, name}[]` 之類 plain data。JSX 留俾 render path 即時 `.map(...)` 處理
+  - 共用 component 嘅 props 應該 **type 標 data shape**(`MemberOption[]`)而唔係 `React.ReactNode` / `JSX.Element[]` — TypeScript 直接 enforce contract
+  - Lint rule 候選:`no-jsx-in-state` — flag `useState<JSX.Element>` / `.map(() => <...>)` assigned to const 嘅 pattern(暫時冇 ESLint plugin,留 lesson)
+- **Regression test**: ✅ **2026-06-10 加**:
+  - **E2E**:`e2e/tests/add-task-modal-rg.spec.ts` RG-017 test:Task Tab 入口開 modal → 「負責人」select 應該有 ≥2 個 `<option>`(`-- 不指定 --` + 至少 1 個 project member,用 admin seed 必有),每個 option 嘅 `value` attribute 應該 truthy(唔係 undefined / `[object Object]`)同 text content 應該 visible
+  - **TypeScript guard**:`AddTaskModal.tsx:40` `assigneeOptions: MemberOption[]` + `MemberOption = { id: string; name: string }` — 將來 caller 再傳 JSX.Element[],`tsc --noEmit` 即報 type error(本身已 enforce,但 RG entry 留 record)
+- **Ref**:
+  - `frontend/src/pages/ProjectDetailPage.tsx` assigneeOptions / participantOptions data shape normalise
+  - `frontend/src/components/AddTaskModal.tsx` `MemberOption` interface export(common contract source of truth)
+  - Sprint 17 commit `f6f3674` + commit b869fa5 + **本 sprint 補 add-task-modal-rg.spec.ts**
