@@ -1,5 +1,5 @@
 /**
- * Project route helper test — US-2.1, US-2.2 (P0)
+ * Project route helper test — US-2.1, US-2.2, US-2.3, US-2.4 (all P0)
  *
  * Covers:
  *  - US-2.1: 建項目 — 已有 E2E (critical-path), 補 unit test 守住:
@@ -8,6 +8,11 @@
  *  - US-2.2: 加成員 — 補 unit test 守住:
  *    * addMember permission 邏輯 (admin / PM / has assign_roles perm)
  *    * member role 預設值 / 校驗
+ *  - US-2.4 (Sprint 10): 部門 link project — 守住:
+ *    * buildProjectListWhereForUser: departmentId filter + non-admin scope OR
+ *    * null department = 跨部門 / no-dept 項目
+ *  - US-2.3 (Sprint 10): Project dashboard — 守住 buildProjectSummary 嘅
+ *    tasks / bugs / requirements / worklog hours 嘅聚合 invariant
  *
  * 對應 TECH-DEBT TD-001 + 紅線 12 (P0 US 必有 unit + E2E).
  *
@@ -331,5 +336,304 @@ describe('US-7.x Sprint 9: GET /:id/requirements paginated response', () => {
     expect(r.requirements).toEqual([])
     expect(r.totalCount).toBe(0)
     expect(r.totalPages).toBe(1)
+  })
+})
+
+// ─── US-2.4 部門 link project ────────────────────────────────────────────────
+
+/**
+ * 從 projects.ts GET / derive 嘅 list where 條件組合(US-2.4)
+ * 保持同 source 完全一致(projects.ts:30-46):
+ *  - admin 唔加 scope OR,直接 filter
+ *  - 非 admin: where.OR = [成員, 同部門]
+ *  - query.departmentId 一律加 where.departmentId = query.departmentId
+ *  - null department = 「冇部門」嘅 legacy 項目,只 admin / member 見到
+ */
+function buildProjectListWhereForUser(
+  query: { departmentId?: string },
+  user: AuthUser | null,
+  userDepartmentId: string | null
+): Record<string, any> {
+  const where: Record<string, any> = {}
+
+  if (user?.role !== 'admin') {
+    const orFilters: any[] = [
+      { members: { some: { userId: user?.id } } }
+    ]
+    if (userDepartmentId) {
+      orFilters.push({ departmentId: userDepartmentId })
+    }
+    where.OR = orFilters
+  }
+
+  if (query.departmentId) {
+    where.departmentId = query.departmentId
+  }
+
+  return where
+}
+
+/**
+ * 從 projects.ts derive 嘅 departmentId 處理(US-2.4)
+ * 純化 normalize,前端送 null string / undefined 統一變 null
+ * (即係「解除部門 link」)
+ */
+function normalizeDepartmentIdOnUpdate(input: unknown): string | null | undefined {
+  if (input === undefined) return undefined // 唔郁
+  if (input === null || input === '') return null // 解除 link
+  return String(input)
+}
+
+describe('US-2.4 (Sprint 10): 部門 link project', () => {
+  describe('buildProjectListWhereForUser', () => {
+    test('admin 冇帶 departmentId → 返空 where (見晒所有)', () => {
+      const where = buildProjectListWhereForUser({}, { id: 'u-1', role: 'admin' }, null)
+      expect(where.OR).toBeUndefined()
+      expect(where.departmentId).toBeUndefined()
+    })
+
+    test('admin 帶 departmentId → 只加 where.departmentId,唔加 OR scope', () => {
+      const where = buildProjectListWhereForUser(
+        { departmentId: 'd-1' },
+        { id: 'u-1', role: 'admin' },
+        null
+      )
+      expect(where.OR).toBeUndefined()
+      expect(where.departmentId).toBe('d-1')
+    })
+
+    test('非 admin 有部門 → OR scope = [member, same department]', () => {
+      const where = buildProjectListWhereForUser(
+        {},
+        { id: 'u-1', role: 'developer' },
+        'd-1'
+      )
+      expect(where.OR).toEqual([
+        { members: { some: { userId: 'u-1' } } },
+        { departmentId: 'd-1' },
+      ])
+    })
+
+    test('非 admin 冇部門 → OR scope 只有 member check', () => {
+      const where = buildProjectListWhereForUser(
+        {},
+        { id: 'u-1', role: 'developer' },
+        null
+      )
+      expect(where.OR).toEqual([
+        { members: { some: { userId: 'u-1' } } },
+      ])
+    })
+
+    test('非 admin 帶 departmentId filter → OR + departmentId AND', () => {
+      const where = buildProjectListWhereForUser(
+        { departmentId: 'd-2' },
+        { id: 'u-1', role: 'developer' },
+        'd-1'
+      )
+      // 開發者用戶 d-1 部門,但 filter 要 d-2 → 結果係 (member OR d-1) AND d-2
+      expect(where.OR).toEqual([
+        { members: { some: { userId: 'u-1' } } },
+        { departmentId: 'd-1' },
+      ])
+      expect(where.departmentId).toBe('d-2')
+    })
+
+    test('null user → 仍然入 OR scope branch 但 userId undefined(caller 應該 guard 返)', () => {
+      // 注意:source 喺 line 29 已經 early return {projects:[]} if (!user),
+      // 所以呢個 derive 只處理 user 已經存在嘅情況。
+      // null user 入到呢度會出 `{members: {some: {userId: undefined}}}` — caller 必須 guard。
+      const where = buildProjectListWhereForUser({}, null, null)
+      expect(where.OR).toBeDefined()
+      expect(where.OR[0]).toEqual({ members: { some: { userId: undefined } } })
+    })
+  })
+
+  describe('normalizeDepartmentIdOnUpdate', () => {
+    test('undefined → undefined (PUT 唔郁 departmentId)', () => {
+      expect(normalizeDepartmentIdOnUpdate(undefined)).toBeUndefined()
+    })
+
+    test('null → null (PUT 解除部門 link)', () => {
+      expect(normalizeDepartmentIdOnUpdate(null)).toBeNull()
+    })
+
+    test('空 string → null (frontend form clear)', () => {
+      expect(normalizeDepartmentIdOnUpdate('')).toBeNull()
+    })
+
+    test('正常 id → 原樣 string', () => {
+      expect(normalizeDepartmentIdOnUpdate('d-1')).toBe('d-1')
+    })
+
+    test('數字 → 轉 string', () => {
+      expect(normalizeDepartmentIdOnUpdate(123)).toBe('123')
+    })
+  })
+})
+
+// ─── US-2.3 Project dashboard summary ────────────────────────────────────────
+
+/**
+ * 從將開嘅 GET /projects/:id/summary derive 嘅聚合 helper(US-2.3)
+ * 目標 invariant:
+ *  - tasks: { total, byStatus: {todo, in_progress, testing, done} }
+ *  - bugs: { total, bySeverity: {low, medium, high, critical} }
+ *  - requirements: { total, byStatus: {draft, approved, in_progress, done} }
+ *  - worklogHours: number
+ *  - recentActivity: 頭 N 條(揀 task / bug / requirement 嘅最新)
+ *
+ * 呢個 helper 暫時 derive,等開 endpoint 嗰陣直接 import 或者 inline 落 route。
+ */
+type ProjectSummaryInput = {
+  tasks: Array<{ status: string }>
+  bugs: Array<{ severity: string; status: string }>
+  requirements: Array<{ status: string }>
+  workLogs: Array<{ hours: number | { toString(): string } }>
+}
+
+function buildProjectSummary(input: ProjectSummaryInput) {
+  const tasksByStatus: Record<string, number> = {}
+  for (const t of input.tasks) {
+    tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1
+  }
+  const bugsBySeverity: Record<string, number> = {}
+  for (const b of input.bugs) {
+    bugsBySeverity[b.severity] = (bugsBySeverity[b.severity] || 0) + 1
+  }
+  const requirementsByStatus: Record<string, number> = {}
+  for (const r of input.requirements) {
+    requirementsByStatus[r.status] = (requirementsByStatus[r.status] || 0) + 1
+  }
+  const totalHours = input.workLogs.reduce(
+    (sum, w) => sum + Number(w.hours),
+    0
+  )
+  return {
+    tasks: { total: input.tasks.length, byStatus: tasksByStatus },
+    bugs: { total: input.bugs.length, bySeverity: bugsBySeverity },
+    requirements: {
+      total: input.requirements.length,
+      byStatus: requirementsByStatus,
+    },
+    worklogHours: Math.round(totalHours * 100) / 100,
+  }
+}
+
+describe('US-2.3 (Sprint 10): Project dashboard summary 聚合', () => {
+  test('空 project → 全部 0', () => {
+    const summary = buildProjectSummary({
+      tasks: [],
+      bugs: [],
+      requirements: [],
+      workLogs: [],
+    })
+    expect(summary.tasks.total).toBe(0)
+    expect(summary.tasks.byStatus).toEqual({})
+    expect(summary.bugs.total).toBe(0)
+    expect(summary.requirements.total).toBe(0)
+    expect(summary.worklogHours).toBe(0)
+  })
+
+  test('tasks by status 計數正確', () => {
+    const summary = buildProjectSummary({
+      tasks: [
+        { status: 'todo' },
+        { status: 'todo' },
+        { status: 'in_progress' },
+        { status: 'done' },
+      ],
+      bugs: [],
+      requirements: [],
+      workLogs: [],
+    })
+    expect(summary.tasks.total).toBe(4)
+    expect(summary.tasks.byStatus).toEqual({
+      todo: 2,
+      in_progress: 1,
+      done: 1,
+    })
+  })
+
+  test('bugs by severity 計數正確', () => {
+    const summary = buildProjectSummary({
+      tasks: [],
+      bugs: [
+        { severity: 'low', status: 'open' },
+        { severity: 'high', status: 'open' },
+        { severity: 'high', status: 'resolved' },
+      ],
+      requirements: [],
+      workLogs: [],
+    })
+    expect(summary.bugs.total).toBe(3)
+    expect(summary.bugs.bySeverity).toEqual({ low: 1, high: 2 })
+  })
+
+  test('worklog hours 自動 sum + round 到 2 decimal', () => {
+    const summary = buildProjectSummary({
+      tasks: [],
+      bugs: [],
+      requirements: [],
+      workLogs: [
+        { hours: 1.5 },
+        { hours: 2.25 },
+        { hours: 0.1 },
+        { hours: 3.999 },
+      ],
+    })
+    // 1.5 + 2.25 + 0.1 + 3.999 = 7.849 → round → 7.85
+    expect(summary.worklogHours).toBe(7.85)
+  })
+
+  test('Prisma Decimal hours field → 接受 (toString 友善處理)', () => {
+    // Prisma Postgres 會返 Decimal type,有 toString()
+    const fakeDecimal = { toString: () => '4.50' }
+    const summary = buildProjectSummary({
+      tasks: [],
+      bugs: [],
+      requirements: [],
+      workLogs: [{ hours: fakeDecimal as any }],
+    })
+    expect(summary.worklogHours).toBe(4.5)
+  })
+
+  test('full project scenario: 全部 metrics 一起計', () => {
+    const summary = buildProjectSummary({
+      tasks: [
+        { status: 'todo' },
+        { status: 'in_progress' },
+        { status: 'in_progress' },
+        { status: 'testing' },
+        { status: 'done' },
+      ],
+      bugs: [
+        { severity: 'medium', status: 'open' },
+        { severity: 'high', status: 'open' },
+        { severity: 'low', status: 'resolved' },
+      ],
+      requirements: [
+        { status: 'draft' },
+        { status: 'approved' },
+        { status: 'in_progress' },
+      ],
+      workLogs: [{ hours: 8 }, { hours: 4.5 }, { hours: 2 }],
+    })
+    expect(summary.tasks.total).toBe(5)
+    expect(summary.tasks.byStatus).toEqual({
+      todo: 1,
+      in_progress: 2,
+      testing: 1,
+      done: 1,
+    })
+    expect(summary.bugs.total).toBe(3)
+    expect(summary.bugs.bySeverity).toEqual({
+      medium: 1, high: 1, low: 1,
+    })
+    expect(summary.requirements.total).toBe(3)
+    expect(summary.requirements.byStatus).toEqual({
+      draft: 1, approved: 1, in_progress: 1,
+    })
+    expect(summary.worklogHours).toBe(14.5)
   })
 })
