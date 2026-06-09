@@ -1,10 +1,12 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 13 closure,4 個 pre-existing E2E failure 全綠
-> **Update**: 2026-06-10 Sprint 13 — Pre-existing failure 修復 closure:
->   - `bugs-fix.spec.ts` #5 attachments + #8 project card click (3 test): `getSampleProjectId` helper 改 graceful pattern(搵「範例」→ fallback `projects[0]` → 自己 create)— Sprint 8+ docker entrypoint 改咗 seed,RG-015 已經 patch 過一個 file,但呢個 file 仲未
->   - `project-kanban.spec.ts` developer RBAC test: **backend 已 patch 過 RG-015**(`canEditTaskFields` 純 function + 9 個 boundary unit test),前次 fail 係 stale task + rate limit,backend source 早已 work
->   - E2E:51 pass → 55 pass(+4),0 fail;Backend unit:601 pass(RG-015 後 592 → 601,+9 boundary test)
+> **Status**: 🟢 2026-06-10 — Sprint 14 closure,4 個 David feedback 全綠
+> **Update**: 2026-06-10 Sprint 14 — David UX 反饋 4 個項目全部 ship:
+>   - **`/projects` 頁面 search box**(client-side useMemo filter,跟 `list-search-box` skill default pattern)
+>   - **`/projects` 頁面 mobile RWD**(`flex-col sm:flex-row` header 改 layout + 4 個 page iPhone 14 viewport audit 0 overflow)
+>   - **WorkLogs + Reports 嘅 project dropdown 改 Autocomplete**(`<ProjectAutocomplete>` 自建 reusable component,type-ahead + keyboard nav + 顯示 status badge)
+>   - **Dashboard 重新設計**(Activity Feed 4 widget:進行中任務/未解決缺陷/本週時數/項目總數 + Recent Projects Quick Switch + 全部項目 grid 改顯示首 12 個 + 睇更多 link)
+>   - **E2E:55 → 61 pass**(+6 sprint14 spec),0 fail;Backend unit:601 pass(無 backend 改)
 > **Update**: 2026-06-10 Sprint 12 — US-5.6 由 PARTIAL 🟡 → **PASS-UNIT + PASS-E2E** 🟢🟢(`e2e/tests/project-detail-bug-tab.spec.ts` 4/4 pass,ProjectDetailPage bug tab create + rich text + image paste + client-side search filter 全綠;新 spec 揭發 3 個 implementation detail:bug row 冇 `/bugs/:id` link,search 係 client-side useMemo,Tiptap image paste 一定要走 handlePaste clipboard event path)
 > **Update**: 2026-06-09 收工 — Retro Sprint 11 follow-up registration:US-5.6 E2E DRAFT T15a (ProjectDetailPage bug tab create + rich text + image paste) + T15b (search filter) Sprint 11 planned;US-10.3 NONE-HOLD — client-side title search done,full-text search hold 等下個 epic 決定(tsvector / MeiliSearch)
 > **Update**: 2026-06-10 Sprint 10 — US-6.4 worklogs filter RBAC 由 NONE → PASS-UNIT(9 個 test,non-admin 強制 userId + admin departmentId gate),Unit 549→558(+9)
@@ -101,7 +103,7 @@
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
 | Unit tests 總數 | **601 pass** (Sprint 13: 592 → 601,+9 — RG-015 boundary case for `canEditTaskFields` developer RBAC,9 個 test 加喺 `tasks.test.ts` Sprint 10 已加但 tracker baseline 冇更新) |
-| E2E tests | **55 pass + 8 skipped** (Sprint 13: 51 → 55,+4 pre-existing failure 修復 — bugs-fix #5 + #8 共 3 test 用 graceful `getSampleProjectId`;project-kanban developer RBAC test 之前 stale + rate limit,Sprint 13 重跑 backend RG-015 已 work) |
+| E2E tests | **61 pass + 8 skipped** (Sprint 14: 55 → 61,+6 — `sprint14-projects-search-and-dashboard.spec.ts` T14.1 2 個 + T14.3 2 個 + T14.4 2 個) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
 
@@ -161,6 +163,29 @@
 - **Out of scope(留俾下個 sprint)**:
   - 抽 `getSampleProjectId` 共享 helper 入 `_helpers.ts`(避免 3 個 file 各自 re-implement)
   - 把 `rbac-negative.spec.ts:173` 同 `bugs-fix.spec.ts` 同 `project-detail-bug-tab.spec.ts` 3 處 graceful pattern 統一
+
+### Sprint 14 (2026-06-10) 收工摘要 — David UX 反饋 4 個項目
+
+- **目標**:David 4 個 feedback 全部 ship-ready
+  1. `/projects` search box 缺
+  2. `/projects` mobile RWD 有問題
+  3. WorkLogs + Reports project dropdown 改 Autocomplete + 顯示全部項目
+  4. Dashboard 太單調(只係項目 list),要重新設計
+- **修法**:
+  - **#1 search box**:`ProjectsPage.tsx` 加 `useMemo` filter 配 `Search` icon input,match project name + department name,2 層 empty state(raw empty + filter empty with「清空搜尋」button),`aria-label="搜尋項目"`
+  - **#2 RWD**:`ProjectsPage` header 改 `flex-col sm:flex-row` + 部門 filter + search + 「新建項目」button stack 包好,`RWD mobile audit` 跑 iPhone 14 viewport 4 個 page 全部 `body=390=viewport,overflow=0`
+  - **#3 Autocomplete**:`WorkLogsPage` + `ReportsPage` 改 `projectApi.list({ limit: -1 })`(原本 page 1 only 漏咗後面 page),自建 `<ProjectAutocomplete>` reusable component(type-ahead + 鍵盤 ↑↓Enter Esc + 顯示 status badge + clear button),WorkLogs 有 2 個 + Reports 有 1 個 instance
+  - **#4 Dashboard redesign**:完全重寫 `DashboardPage.tsx` — Activity Feed 4 widget(進行中任務/未解決缺陷/本週時數/項目總數)+ Recent Projects Quick Switch(localStorage `pm-system:recent-project-ids` track)+ 所有項目 grid 改 pageSize 12 + 「睇更多」link
+- **意外發現 / 教訓**:
+  - **`limit: -1` 喺 Dashboard 嘅副作用**:`projectApi.list({ limit: -1 })` 攞晒 196 個項目 render 喺 Dashboard → 截圖 91834px tall(FullPage screenshot tool 開心死咗)。改成 `pageSize: 12` + `totalCount` 顯示真實總數 + 「睇更多」link。Lesson: **`limit: -1` 只用喺真正需要 list 全嘅 dropdown**,Dashboard/list 永遠要 pagination
+  - **E2E spec import path 差異**:`pm-system/` cwd 跑 `npx playwright test` 撞 npm/node_modules 衝突,要 `cd e2e/` 先啱
+  - **RWD audit tool 局限**:`fullPage: true` screenshot 無限 scroll 嘅 page 會爆 100k px。production 應該用 `clip` 限制範圍
+  - **ProjectAutocomplete reusable**:將來 5+ 個 page 可以 reuse 呢個 component,將 `user` / `task` / `bug` 嘅 Autocomplete 一致化
+- **紅線狀態**:紅線 11(tracker 同步)✅、紅線 12(P0 US 必有 E2E)✅、紅線 13(無 user-reported bug fix)N/A(純 UX 改進,無 fix bug)
+- **Out of scope(留俾下個 sprint)**:
+  - `<EntityAutocomplete>` generic化(Pick<id, name, type> 適用 user / task / bug)
+  - Dashboard widget 加 chart(本週時數 sparkline + 按部門)
+  - Mobile RWD 全 project audit(目前只 audit 4 個 page,Layout + 其他 page 未 audit)
 
 🟢🟢 **8 個 P0 US 雙綠**(Sprint 8: 7 個) — Sprint 9 +US-11.2(工時 / 成本報告)由 NONE → 雙綠。
 🟢 **22 個 P0 US PASS-UNIT** — Sprint 9 +US-11.1(進度報告)由 NONE → PASS-UNIT。

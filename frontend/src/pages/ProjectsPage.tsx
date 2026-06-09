@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, Folder, Edit2, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Folder, Edit2, Trash2, Search } from 'lucide-react'
 import { projectApi, departmentApi } from '../utils/api'
 import type { Project } from '../types'
 import { useAuth } from '../context/AuthContext'
@@ -27,12 +27,27 @@ export default function ProjectsPage() {
 
   // Department filter
   const [filterDepartmentId, setFilterDepartmentId] = useState('')
+  // Search (Sprint 14 — list-search-box pattern, client-side useMemo)
+  const [searchProject, setSearchProject] = useState('')
 
   // Pagination (US-7.x)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
+
+  // Client-side search filter (Sprint 14)
+  // Match project name + department name (so typing "工程" finds projects in 工程部)
+  const filteredProjects = useMemo(() => {
+    const q = searchProject.trim().toLowerCase()
+    if (!q) return projects
+    return projects.filter((p) => {
+      if (p.name.toLowerCase().includes(q)) return true
+      const dept = (p as any).department?.name
+      if (dept && dept.toLowerCase().includes(q)) return true
+      return false
+    })
+  }, [projects, searchProject])
 
   // Edit modal
   const [showEditModal, setShowEditModal] = useState(false)
@@ -187,18 +202,19 @@ export default function ProjectsPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-8">
-        <Link to="/" className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-          <ArrowLeft size={24} />
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold text-gray-900">項目列表</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 lg:mb-8">
+        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+          <Link to="/" className="p-2 hover:bg-gray-200 rounded-lg transition-colors flex-shrink-0">
+            <ArrowLeft size={24} />
+          </Link>
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 truncate">項目列表</h1>
         </div>
         {user?.role === 'admin' && (
           <select
             value={filterDepartmentId}
             onChange={(e) => setFilterDepartmentId(e.target.value)}
-            className="input-field w-48"
+            className="input-field w-full sm:w-48"
+            aria-label="篩選部門"
           >
             <option value="">全部部門</option>
             {departments.map(d => (
@@ -206,10 +222,21 @@ export default function ProjectsPage() {
             ))}
           </select>
         )}
+        <div className="relative w-full sm:w-72">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchProject}
+            onChange={(e) => setSearchProject(e.target.value)}
+            placeholder="搜尋項目..."
+            aria-label="搜尋項目"
+            className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        </div>
         {hasAnyPermission(user, ['projects.create']) && (
           <button
             onClick={() => { setDepartmentId(''); setShowForm(true) }}
-            className="btn-primary flex items-center gap-2"
+            className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center"
           >
             <Plus size={20} />
             新建項目
@@ -222,20 +249,32 @@ export default function ProjectsPage() {
         <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
           共 {totalCount} 個項目
           {filterDepartmentId && ` · 已篩選部門：${departments.find(d => d.id === filterDepartmentId)?.name || '未知'}`}
+          {searchProject && ` · 搜尋「${searchProject}」: ${filteredProjects.length} 個結果`}
         </div>
       )}
 
-      {/* Project List */}
-      {!isLoading && projects.length === 0 && (
+      {/* Project List — 2 層 empty state (raw empty vs filter empty, Sprint 14) */}
+      {!isLoading && projects.length === 0 ? (
+        // ① Raw empty — 真係冇 data
         <div className="text-center py-12">
           <Folder size={48} className="mx-auto text-gray-300 mb-4" />
           <p className="text-gray-500">還沒有項目，點擊上方按鈕新建</p>
         </div>
-      )}
-
-      {!isLoading && projects.length > 0 && (
+      ) : !isLoading && filteredProjects.length === 0 ? (
+        // ② Filter empty — 搜尋無結果
+        <div className="text-center py-12">
+          <Search size={48} className="mx-auto text-gray-300 mb-4" />
+          <p className="text-gray-500">無符合「{searchProject}」嘅項目</p>
+          <button
+            onClick={() => setSearchProject('')}
+            className="mt-3 text-sm text-primary-600 hover:text-primary-700"
+          >
+            清空搜尋
+          </button>
+        </div>
+      ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map((project) => (
+          {filteredProjects.map((project) => (
             // 整張 card 都係 link,唔淨只 project name — RG-2026-06-09 bug #8
             // (原 link 只包住 <h3>,要點 card 其他位無反應)
             <Link

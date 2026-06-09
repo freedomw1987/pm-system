@@ -5,8 +5,8 @@ import { workLogApi, projectApi, taskApi, bugApi, userApi, departmentApi } from 
 import type { WorkLog } from '../types'
 import * as ExcelJS from 'exceljs'
 import { hasAnyPermission, hasPermission } from '../utils/permissions'
+import ProjectAutocomplete, { type ProjectOption } from '../components/ProjectAutocomplete'
 
-interface ProjectOption { id: string; name: string }
 interface TaskOption { id: string; title: string; requirementTitle?: string }
 interface BugOption { id: string; title: string; requirementTitle?: string }
 interface DepartmentOption { id: string; name: string }
@@ -90,8 +90,16 @@ export default function WorkLogsPage() {
 
   const loadProjects = async () => {
     try {
-      const res = await projectApi.list()
-      setProjects(res.data.projects || [])
+      // Sprint 14: limit: -1 → 載晒全部項目,畀 Autocomplete 揀(原本 page 1 only 漏咗後面 page)
+      const res = await projectApi.list({ limit: -1 })
+      // Map wire shape → ProjectOption (camelCase department + status 都喺 wire 入面)
+      const opts: ProjectOption[] = (res.data.projects || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        department: p.department ? { name: p.department.name } : null,
+      }))
+      setProjects(opts)
     } catch (err) {
       console.error('Failed to load projects:', err)
     }
@@ -544,16 +552,15 @@ export default function WorkLogsPage() {
         {/* Project, Department, User filters + Group By */}
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[150px]">
-            <select
+            {/* Sprint 14: replace native select with <ProjectAutocomplete> for type-ahead + keyboard nav */}
+            <ProjectAutocomplete
               value={filterProject}
-              onChange={(e) => setFilterProject(e.target.value)}
-              className="input-field text-sm w-full"
-            >
-              <option value="">全部項目</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              onChange={(id) => setFilterProject(id)}
+              projects={projects}
+              placeholder="全部項目"
+              ariaLabel="篩選項目"
+              className="w-full"
+            />
           </div>
           <div className="flex-1 min-w-[150px]">
             {hasAnyPermission(user, ['worklogs.view_all']) ? (
@@ -933,20 +940,17 @@ export default function WorkLogsPage() {
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">登記工作時數</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Project */}
+              {/* Project — Sprint 14: <ProjectAutocomplete> 取代 native select */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">項目 *</label>
-                <select
+                <ProjectAutocomplete
                   value={formData.projectId}
-                  onChange={(e) => handleProjectChange(e.target.value)}
-                  className="input-field"
+                  onChange={(id) => handleProjectChange(id)}
+                  projects={projects}
+                  placeholder="選擇項目"
                   required
-                >
-                  <option value="">選擇項目</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
+                  ariaLabel="選擇項目"
+                />
               </div>
 
 {/* Task/Bug type selector - appears after project is selected */}

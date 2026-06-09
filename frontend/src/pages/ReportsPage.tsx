@@ -3,9 +3,10 @@ import { BarChart3, DollarSign, TrendingUp } from 'lucide-react'
 import { reportApi, projectApi } from '../utils/api'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import type { Project, CostReport, ProgressReport } from '../types'
+import ProjectAutocomplete, { type ProjectOption } from '../components/ProjectAutocomplete'
 
 export default function ReportsPage() {
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projects, setProjects] = useState<ProjectOption[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [costReport, setCostReport] = useState<CostReport | null>(null)
   const [progressReport, setProgressReport] = useState<ProgressReport | null>(null)
@@ -23,8 +24,16 @@ export default function ReportsPage() {
 
   const loadProjects = async () => {
     try {
-      const response = await projectApi.list()
-      setProjects(response.data.projects)
+      // Sprint 14: limit: -1 → 載晒全部項目,畀 Autocomplete 揀(原本 page 1 only 漏咗後面 page)
+      const response = await projectApi.list({ limit: -1 })
+      // Map wire shape → ProjectOption (camelCase department + status 都喺 wire 入面)
+      const opts: ProjectOption[] = (response.data.projects || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        department: p.department ? { name: p.department.name } : null,
+      }))
+      setProjects(opts)
     } catch (err) {
       console.error('Failed to load projects:', err)
     }
@@ -59,21 +68,18 @@ export default function ReportsPage() {
         <p className="text-gray-500 mt-1">查看項目成本和進度報表</p>
       </div>
 
-      {/* Project Selector */}
+      {/* Project Selector — Sprint 14: <ProjectAutocomplete> 取代 native select */}
       <div className="card p-4 lg:p-6 mb-6 lg:mb-8">
         <label className="block text-sm font-medium text-gray-700 mb-2">選擇項目</label>
-        <select
+        <ProjectAutocomplete
           value={selectedProjectId}
-          onChange={(e) => setSelectedProjectId(e.target.value)}
-          className="input-field w-full sm:max-w-md"
-        >
-          <option value="">請選擇項目</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
+          onChange={setSelectedProjectId}
+          projects={projects}
+          placeholder="請選擇項目"
+          required
+          ariaLabel="選擇項目以查看報表"
+          className="w-full sm:max-w-md"
+        />
       </div>
 
       {isLoading ? (
