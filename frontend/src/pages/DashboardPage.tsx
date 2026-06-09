@@ -1,16 +1,21 @@
 /**
- * DashboardPage — Sprint 14 重新設計
+ * DashboardPage — Sprint 14 widget grid + Sprint 15 scope=my + Sprint 16 minimal
  *
- * 舊版只係 project list,sprint 14 改做 Activity Feed + Project Quick Switch:
- * - 上半:個人化 widget grid
+ * Sprint 16 (David 2026-06-10 feedback):Dashboard 只 show 統計 + 項目清單,
+ * 拎走「最近訪問」quick switch section(屬於 navigation 唔屬於統計/清單)。
+ *
+ * 結構:
+ * - 上半:個人化 widget grid(4 個 widget,全係 user-specific 統計)
  *   - 我的任務(進行中,5 個)
  *   - 我的缺陷(未解決,5 個)
  *   - 本週時數 + chart
- *   - 最近訪問項目(5 個,localStorage track)
- * - 下半:全部項目 grid(原有)
+ *   - 我參與嘅項目(backend `projectTotalCount`,scope=my 嚴格)
+ * - 下半:我參與嘅項目 grid(scope=my 嚴格,pageSize 12)
  *
  * 設計 rationale:Activity Feed 係 Linear / Asana / Jira 等 PM tool 嘅標準 pattern,
- * 用戶 0-config 即刻有「今日做咩」嘅 context(對比舊版只係 6 個項目卡 list)
+ * 用戶 0-config 即刻有「今日做咩」嘅 context(對比舊版只係 6 個項目卡 list)。
+ * Sprint 16 進一步收緊:David 講「只 show 統計 + 項目清單」,
+ * 連 quick switch(navigation affordance)都拎走,等 Dashboard 100% 對應 David 嘅定義。
  */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -29,20 +34,8 @@ import { projectApi, taskApi, bugApi, workLogApi } from '../utils/api'
 import { hasAnyPermission } from '../utils/permissions'
 import type { Project, Task, Bug as BugType } from '../types'
 
-// localStorage key for "recently visited projects"
-const RECENT_PROJECTS_KEY = 'pm-system:recent-project-ids'
-const RECENT_PROJECTS_MAX = 5
-
-const getRecentProjectIds = (): string[] => {
-  try {
-    const raw = localStorage.getItem(RECENT_PROJECTS_KEY)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.slice(0, RECENT_PROJECTS_MAX) : []
-  } catch {
-    return []
-  }
-}
+// localStorage keys for "recently visited projects" — Sprint 16 拎走
+// (David: Dashboard 只 show 統計 + 項目清單,navigation affordance 唔屬於呢類)
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -52,7 +45,6 @@ export default function DashboardPage() {
   const [myBugs, setMyBugs] = useState<BugType[]>([])
   const [weekHours, setWeekHours] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
-  const [recentProjectIds] = useState<string[]>(getRecentProjectIds())
 
   useEffect(() => {
     loadAll()
@@ -120,11 +112,6 @@ export default function DashboardPage() {
       default: return 'bg-gray-100 text-gray-600'
     }
   }
-
-  // Recent projects:filter projects by recentProjectIds (preserving order)
-  const recentProjects = recentProjectIds
-    .map((id) => projects.find((p) => p.id === id))
-    .filter((p): p is Project => p !== undefined)
 
   return (
     <div>
@@ -251,46 +238,6 @@ export default function DashboardPage() {
               </p>
             </Link>
           </div>
-
-          {/* === Recent Projects (Quick Switch) — Sprint 14 === */}
-          {recentProjects.length > 0 && (
-            <div className="mb-6 lg:mb-8">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-gray-900">最近訪問</h2>
-                <Link
-                  to="/projects"
-                  className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
-                >
-                  查看全部 <ChevronRight size={14} />
-                </Link>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-                {recentProjects.map((p) => (
-                  <Link
-                    key={p.id}
-                    to={`/projects/${p.id}`}
-                    className="card p-3 hover:shadow-md transition-shadow"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-8 h-8 rounded bg-primary-100 flex items-center justify-center flex-shrink-0">
-                        <FolderKanban className="text-primary-600" size={16} />
-                      </div>
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${getStatusColor(p.status)}`}
-                      >
-                        {p.status === 'active'
-                          ? '進行中'
-                          : p.status === 'completed'
-                          ? '已完成'
-                          : '已歸檔'}
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* === 我參與嘅項目 grid (Sprint 15: scope=my 嚴格只 show 自己 member 嘅) === */}
           <div className="flex items-center justify-between mb-3">
