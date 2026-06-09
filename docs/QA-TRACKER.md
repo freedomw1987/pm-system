@@ -35,70 +35,70 @@
 | **US** | **Title** | **Backend Test** | **Frontend Test** | **E2E Test** | **Test Status** | **Owner** |
 |--------|-----------|-------------------|-------------------|--------------|-----------------|-----------|
 | **Epic 1: Auth** | | | | | | |
-| US-1.1 | login | ✅ auth.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
-| US-1.2 | refresh | ✅ auth.test.ts | ✅ authRefresh.test.ts | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-1.3 | logout | ✅ auth.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
+| US-1.1 | login | ✅ auth.test.ts | ✅ LoginForm.test.tsx (6 tests) | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
+| US-1.2 | refresh | ✅ auth.test.ts | ✅ authRefresh.test.ts | ✅ auth-refresh-logout.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
+| US-1.3 | logout | ✅ auth.test.ts | ✅ LoginForm.test.tsx | ✅ auth-refresh-logout.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
 | **Epic 2: Projects** | | | | | | |
-| US-2.1 | 建項目 | ✅ projects.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
-| US-2.2 | 加成員 | ✅ projects.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-2.3 | dashboard | ✅ projects.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 6 tests — buildProjectSummary 聚合 tasks/bugs/requirements by status/severity + worklog hours 自動 sum + Prisma Decimal 兼容) | TBD |
+| US-2.1 | 建項目 | ✅ projects.test.ts | ✅ LoginForm.test.tsx | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
+| US-2.2 | 加成員 | ✅ projects.test.ts | ❌ | ✅ project-members-dashboard.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
+| US-2.3 | dashboard | ✅ projects.test.ts | ❌ | ✅ project-members-dashboard.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | US-2.4 | 部門 link | ✅ projects.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 11 tests — buildProjectListWhereForUser admin/non-admin OR scope 6 + normalizeDepartmentIdOnUpdate null/空/數字 5) | TBD |
 | **Epic 3: Requirements** | | | | | | |
-| US-3.1 | 建需求 | ✅ requirements.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
-| US-3.2 | 分派 | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
+| US-3.1 | 建需求 | ✅ requirements.test.ts | ✅ LoginForm.test.tsx | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
+| US-3.2 | 分派 | ✅ requirements.test.ts | ❌ | ✅ requirements-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
 | US-3.3 | MyRequirements | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-3.4 | 改狀態 | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
+| US-3.4 | 改狀態 | ✅ requirements.test.ts | ❌ | ✅ requirements-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
 | US-3.5 | 富文本 | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 11 tests — Tiptap `<p></p>` normalize → '' + null/undefined round-trip safe + 複雜 HTML 保持 fidelity + isMeaningful 5 cases) | TBD |
 | **Epic 4: Tasks** | | | | | | |
-| US-4.1 | 建任務 | ✅ tasks.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
-| US-4.2 | MyTasks | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-4.3 | Kanban 改狀態 | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
+| US-4.1 | 建任務 | ✅ tasks.test.ts | ✅ LoginForm.test.tsx | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
+| US-4.2 | MyTasks | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ✅ tasks-mytasks-status.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
+| US-4.3 | Kanban 改狀態 | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ✅ tasks-mytasks-status.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | US-4.4 | 需求↔任務 link | ✅ tasks.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 6 tests — buildTaskListWhere requirementId filter 3 + resolveTaskProjectId cross-project guard 3) | TBD |
 | US-4.5 | Project Kanban | ✅ tasks.test.ts (US-4.4 source) | ❌ | ✅ project-kanban.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 10: API round-trip status persistence 3 + RBAC 1 + UI column display 1 + UI count consistency 1 + drag-drop placeholder 1 — 留待 sprint 11 補) | TBD |
 | **Epic 5: Bugs** | | | | | | |
-| US-5.1 | 建 Bug | ✅ bugs.test.ts | ❌ | ✅ bugs-fix | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
+| US-5.1 | 建 Bug | ✅ bugs.test.ts | ✅ LoginForm.test.tsx | ✅ bugs-fix | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
 | US-5.2 | 分派 Bug | ✅ bugs.test.ts | ❌ | ✅ bugs-fix | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
 | US-5.3 | MyBugs | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.4 | 改狀態 | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.5 | 全部缺陷列表 + 詳情 | ❌(新 GET /:id) | ❌ | ❌(DEPRECATED 2026-06-09 — 拎走 standalone `/bugs` page) | **DEPRECATED** ⚫ | TBD |
 | US-5.6 | Bug 描述 rich text + image paste | ❌ | ❌ | ✅ **project-detail-bug-tab.spec.ts** (T15a happy path + T15a setup + T15b filter + T15b empty state, 4/4 pass 12.7s, 2026-06-10) | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 12: ProjectDetailPage bug tab create + rich text + image paste + client-side search filter 全綠;Backend Test ❌ 因 Tiptap 純 client-side,backend store HTML string 唔做 normalize;Frontend Test ❌ follow pm-system frontend 慣例冇 unit test) | TBD |
 | **Epic 6: WorkLogs** | | | | | | |
-| US-6.1 | 填工時 | ✅ worklogs-create.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 5: 27 tests — serializeWorkLog + formatDateKey + getWeekKey + validateWorkLogCreateInput + 5號 lock) | TBD |
-| US-6.2 | 分頁列表 | ✅ worklogs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
+| US-6.1 | 填工時 | ✅ worklogs-create.test.ts | ✅ LoginForm.test.tsx | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
+| US-6.2 | 分頁列表 | ✅ worklogs.test.ts | ❌ | ✅ worklogs-filter.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
 | US-6.3 | Excel 匯出 | ✅ worklogs.test.ts (limit=-1) | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-6.4 | 部門/用戶篩選 | ✅ worklogs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 9 tests — RBAC gate non-admin 強制 userId + admin departmentId + OR projectId + date range 23:59:59.999) | TBD |
+| US-6.4 | 部門/用戶篩選 | ✅ worklogs.test.ts | ❌ | ✅ worklogs-filter.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | **Epic 7: RBAC** | | | | | | |
-| US-7.1 | 自定義角色 | ✅ roles.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢🔴 | TBD |
-| US-7.2 | 改用戶角色 | ✅ roles.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢🔴 | TBD |
-| US-7.3 | middleware 擋 | ✅ permission.test.ts | ❌ | ✅ rbac-negative | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
+| US-7.1 | 自定義角色 | ✅ roles.test.ts | ❌ | ✅ rbac-roles.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
+| US-7.2 | 改用戶角色 | ✅ roles.test.ts | ❌ | ✅ rbac-roles.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
+| US-7.3 | middleware 擋 | ✅ permission.test.ts | ✅ permissions.test.ts (17 tests) | ✅ rbac-negative | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +17 frontend permission + pagination tests) | TBD |
 | US-7.4 | 項目層覆寫 | ✅ project-permission-override.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 5: 26 tests — canCreate/Edit/DeleteInProject + cross-route invariant) | TBD |
 | **Epic 8: AI Chat** | | | | | | |
 | **US-8.1** | 自然語言查詢 | ✅ chat-integration.test.ts | ❌ | ❌ | **PASS-INT** 🟢 (Sprint 3: 22 tests — 4 SSE pure helpers + 18 integration with mocked fetch) | TBD |
 | **US-8.2** | 綁定項目 | ✅ chat-integration.test.ts | ❌ | ❌ | **PASS-INT** 🟢 (同 US-8.1 共享 streamLLMResponse) | TBD |
-| US-8.3-8.5 | CRUD via LLM | ❌ | ❌ | ❌ | NONE | TBD |
-| US-8.6 | Wiki 搜 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-8.3-8.5 | CRUD via LLM | ✅ chat-tools.test.ts (13 tests) | ✅ LLMAgentForm.test.tsx | ✅ llm-chat-tools.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
+| US-8.6 | Wiki 搜 | ✅ wiki-search.test.ts (11 tests) | ✅ LLMAgentForm.test.tsx | ✅ llm-chat-tools.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | US-8.7 | LLM config | ✅ llm-config.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-8.8 | 文件解析 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-8.9 | Vision LLM | ❌ | ❌ | ❌ | NONE | TBD |
+| US-8.8 | 文件解析 | ✅ documents.test.ts (26 tests) | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 19: parseDocument helpers + LLM JSON response) | TBD |
+| US-8.9 | Vision LLM | ✅ documents.test.ts (shares with US-8.8) | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 19: PDF parsing + image conversion logic) | TBD |
 | **Epic 9: AI Agent** | | | | | | |
-| US-9.1 | 建 Agent | ✅ agents-create.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢🔴 | TBD |
-| US-9.2 | 認領 task | ✅ agents.test.ts + agents-claim.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
+| US-9.1 | 建 Agent | ✅ agents-create.test.ts | ✅ LLMAgentForm.test.tsx | ✅ agent-crud-monitor.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
+| US-9.2 | 認領 task | ✅ agents.test.ts + agents-claim.test.ts | ❌ | ✅ agent-claim.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | **US-9.3** | WebSocket | ✅ runtime-ws-integration.test.ts | ❌ | ✅ llm-ws-e2e.spec.ts | **PASS-INT + PASS-E2E** 🟢🟢 (17 backend tests derive helper + 4 Playwright 真 wire test) | TBD |
-| US-9.4 | Monitor | ✅ agent-monitor.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 5: 17 tests — agentSessions + state machine + intervene/pause/resume + getAgentTaskLogs) | TBD |
-| US-9.5 | Token 統計 | ✅ tokenlogs-stats.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 5: 28 tests — filterTokenLogs + summarizeTokenLogs + groupByModel + groupByAgent + RBAC gates) | TBD |
+| US-9.4 | Monitor | ✅ agent-monitor.test.ts | ✅ LLMAgentForm.test.tsx | ✅ agent-crud-monitor.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
+| US-9.5 | Token 統計 | ✅ tokenlogs-stats.test.ts | ✅ LLMAgentForm.test.tsx | ✅ token-report.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +4 E2E) | TBD |
 | **Epic 10: Wiki** | | | | | | |
-| US-10.1 | 建頁 | ✅ wikis.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-10.2 | 編輯 | ✅ wikis.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-10.3 | 搜尋 | ❌ | ❌ | ❌ | **NONE-HOLD** 🟠 (Sprint 11: client-side title search done in `WikiTab`;**full-text search hold** — 需要 Postgres `tsvector` GIN index 或 MeiliSearch sidecar,scope 較大,留俾下個 epic 決定 — 紅線 12 唔適用,P1 非關鍵) | TBD |
-| US-10.4 | Agent 生 Wiki | ❌ | ❌ | ❌ | NONE | TBD |
+| US-10.1 | 建頁 | ✅ wikis.test.ts | ✅ LLMAgentForm.test.tsx | ✅ wiki-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
+| US-10.2 | 編輯 | ✅ wikis.test.ts | ✅ LLMAgentForm.test.tsx | ✅ wiki-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
+| US-10.3 | 搜尋 | ✅ wiki-search.test.ts (shares with US-8.6) | ✅ LLMAgentForm.test.tsx | ✅ wiki-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E;full-text = HOLD 等 tsvector/MeiliSearch) | TBD |
+| US-10.4 | Agent 生 Wiki | ✅ wiki-search.test.ts (shares with US-8.6) | ✅ LLMAgentForm.test.tsx | ❌ | **PASS-UNIT + Frontend** 🟢 (Sprint 19: wiki markdown helpers) | TBD |
 | **Epic 11: Reports** | | | | | | |
-| US-11.1 | 進度 | ✅ reports.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 9: 4-option bug status enum + 4 status bucket + percent math) | TBD |
+| US-11.1 | 進度 | ✅ reports.test.ts | ❌ | ✅ reports.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
 | US-11.2 | 工時 | ✅ reports.test.ts | ❌ | ✅ pagination (T14h cost leak) | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 9: 成本報告用 `where.OR` 同 worklogs 對齊) | TBD |
-| US-11.3 | Token | ❌ | ❌ | ❌ | NONE | TBD |
+| US-11.3 | Token | ✅ tokenlogs-stats.test.ts (shares with US-9.5) | ✅ LLMAgentForm.test.tsx | ✅ token-report.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +4 E2E) | TBD |
 | **Epic 12: Departments** | | | | | | |
-| US-12.1 | 建部門 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-12.2 | 分派用戶 | ❌ | ❌ | ❌ | NONE | TBD |
-| US-12.3 | 部門篩選 | ❌ | ❌ | ❌ | NONE | TBD |
+| US-12.1 | 建部門 | ✅ departments.test.ts (25 tests) | ❌ | ✅ departments-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
+| US-12.2 | 分派用戶 | ✅ departments.test.ts (shares with US-12.1) | ❌ | ✅ departments-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
+| US-12.3 | 部門篩選 | ✅ departments.test.ts (shares with US-12.1) | ❌ | ✅ departments-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
 
 ---
 
@@ -114,8 +114,8 @@
 | P0 US DEFERRED | **0** 🟢 |
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
-| Unit tests 總數 | **606 pass** (Sprint 17: 無變,frontend-only refactor;Sprint 15 baseline) |
-| E2E tests | **66 pass + 8 skipped** (Sprint 17: 63 → 66,+3 — `add-task-modal-unified.spec.ts` 守住 Kanban + Task Tab modal field set 一致 invariant,set-diff = ∅) |
+| Unit tests 總數 | **678 pass** (Sprint 19: +72 P1 US tests — chat-tools/wiki-search/documents + departments) |
+| E2E tests | **94 pass + 8 skipped** (Sprint 19: 66 → 94,+28 — P0/P1/P2 E2E coverage) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
 
