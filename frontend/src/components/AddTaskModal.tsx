@@ -133,23 +133,34 @@ export default function AddTaskModal({
             </div>
 
             {recommendedAgent ? (
-              <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-blue-200">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900">{recommendedAgent.name}</p>
-                  <p className="text-sm text-gray-500">
-                    匹配技能：
-                    {recommendedAgent.skills.map((s) => (
-                      <span key={s} className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
-                        {s}
-                      </span>
-                    ))}
-                  </p>
+              /*
+               * RWD-fix (Sprint 17.1):320px viewport 之前撞 3 個 layout bug:
+               * 1. Avatar 冇 flex-shrink-0 會被 squish
+               * 2. flex-1 冇 min-w-0,長 agent name 撐爆父 container,推 chips overflow
+               * 3. Skill chips 用 inline <span> + ml-1,inline 唔可以 wrap 喺 chip 邊界
+               *
+               * 修法:外層 mobile stack(flex-col),sm: 之後返 flex-row;chips 用 flex-wrap container;
+               *      avatar / chip 都加 shrink-0;agent name truncate(視覺接受 ellipsis 唔接受 overflow)
+               */
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-white rounded-lg border border-blue-200">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Bot className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">{recommendedAgent.name}</p>
+                    <div className="text-sm text-gray-500 flex flex-wrap items-center gap-1 mt-1">
+                      <span className="flex-shrink-0">匹配技能：</span>
+                      {recommendedAgent.skills.map((s) => (
+                        <span key={s} className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 {autoAssignAgent && (
-                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">將自動分配</span>
+                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded flex-shrink-0 whitespace-nowrap self-start sm:self-center">將自動分配</span>
                 )}
               </div>
             ) : title.length >= 3 ? (
