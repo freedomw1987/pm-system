@@ -12,7 +12,6 @@ const navItems: NavItem[] = [
   { path: '/my-requirements', icon: FileText, label: '我的需求', permissions: ['requirements.view'] },
   { path: '/my-tasks', icon: ListTodo, label: '我的任務', permissions: ['tasks.view'] },
   { path: '/my-bugs', icon: Bug, label: '我的缺陷', permissions: ['bugs.view'] },
-  { path: '/bugs', icon: ListTodo, label: '全部缺陷', permissions: ['bugs.view'] },
   { path: '/work-logs', icon: Clock, label: '工作時數', permissions: ['worklogs.view'] },
   { path: '/reports', icon: BarChart3, label: '報表', permissions: ['reports.view'] },
 ]

@@ -131,7 +131,7 @@ export default function BugDetailPage() {
     if (!confirm('確定要刪除這個缺陷嗎?')) return
     try {
       await bugApi.delete(bug.id)
-      navigate('/bugs')
+      navigate('/my-bugs')
     } catch (err: any) {
       console.error('Failed to delete bug:', err)
       alert(err?.response?.data?.error?.message || '刪除缺陷失敗')
@@ -229,7 +229,7 @@ export default function BugDetailPage() {
       <div className="text-center py-20">
         <BugIcon size={48} className="mx-auto text-gray-300 mb-4" />
         <p className="text-gray-500 mb-4">{error || '找不到這個缺陷'}</p>
-        <Link to="/bugs" className="btn-secondary inline-block">返回缺陷列表</Link>
+        <Link to="/my-bugs" className="btn-secondary inline-block">返回缺陷列表</Link>
       </div>
     )
   }
@@ -238,7 +238,7 @@ export default function BugDetailPage() {
     <div className="max-w-5xl">
       {/* Header */}
       <div className="mb-6">
-        <Link to="/bugs" className="flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-4 transition-colors">
+        <Link to="/my-bugs" className="flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-4 transition-colors">
           <ArrowLeft size={18} /><span>返回缺陷列表</span>
         </Link>
         <div className="flex items-start justify-between gap-4">

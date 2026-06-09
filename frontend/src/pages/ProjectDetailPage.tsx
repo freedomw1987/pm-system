@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle, Search, Clock } from 'lucide-react'
 import { projectApi, requirementApi, taskApi, bugApi, userApi, roleApi, workLogApi } from '../utils/api'
@@ -117,6 +117,11 @@ export default function ProjectDetailPage() {
   const [editReqStatus, setEditReqStatus] = useState('')
   const [editReqPriority, setEditReqPriority] = useState('')
   const [isEditingReq, setIsEditingReq] = useState(false)
+
+  // ── Search box (client-side filter, 2026-06-09 David feedback) ──
+  const [searchReq, setSearchReq] = useState('')
+  const [searchTask, setSearchTask] = useState('')
+  const [searchBug, setSearchBug] = useState('')
 
   useEffect(() => { if (id) loadProject() }, [id, pageReq, pageSizeReq, pageTask, pageSizeTask, pageBug, pageSizeBug])
   useEffect(() => { roleApi.list().then(r => setAvailableRoles(r.data.roles || [])) }, [])
@@ -278,6 +283,27 @@ export default function ProjectDetailPage() {
       alert('無法更新角色')
     }
   }
+
+  // ── Search box filter (client-side, 2026-06-09) ──
+  // Filter by title (case-insensitive contains). Use useMemo so we don't
+  // re-filter on every render; only when source data or query changes.
+  const filteredRequirements = useMemo(() => {
+    const q = searchReq.trim().toLowerCase()
+    if (!q) return requirements
+    return requirements.filter(r => r.title.toLowerCase().includes(q))
+  }, [requirements, searchReq])
+
+  const filteredTasks = useMemo(() => {
+    const q = searchTask.trim().toLowerCase()
+    if (!q) return tasks
+    return tasks.filter(t => t.title.toLowerCase().includes(q))
+  }, [tasks, searchTask])
+
+  const filteredBugs = useMemo(() => {
+    const q = searchBug.trim().toLowerCase()
+    if (!q) return bugs
+    return bugs.filter(b => b.title.toLowerCase().includes(q))
+  }, [bugs, searchBug])
 
   // ── Requirement actions ──────────────────────────────────────
   const handleAddRequirement = async (e: React.FormEvent) => {
@@ -698,20 +724,39 @@ export default function ProjectDetailPage() {
       {/* Requirements Tab */}
       {activeTab === 'requirements' && (
         <div>
-          {hasAnyPermission(user, ['requirements.create']) && (
-            <button onClick={() => { setNewReqTitle(''); setNewReqDesc(''); setShowAddReqModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
-              <Plus size={20} /><span>新建需求</span>
-            </button>
-          )}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            {hasAnyPermission(user, ['requirements.create']) && (
+              <button onClick={() => { setNewReqTitle(''); setNewReqDesc(''); setShowAddReqModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
+                <Plus size={20} /><span>新建需求</span>
+              </button>
+            )}
+            <div className="relative w-full sm:w-72">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchReq}
+                onChange={(e) => setSearchReq(e.target.value)}
+                placeholder="搜尋需求..."
+                aria-label="搜尋需求"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          </div>
           {requirements.length === 0 ? (
             <div className="card p-12 text-center">
               <FileText size={48} className="mx-auto text-gray-400 mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">暫無需求</h3>
               <p className="text-gray-500">為項目添加第一個需求</p>
             </div>
+          ) : filteredRequirements.length === 0 ? (
+            <div className="card p-12 text-center">
+              <Search size={48} className="mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">無符合「{searchReq}」嘅需求</h3>
+              <p className="text-gray-500">試下其他關鍵字,或清空搜尋框</p>
+            </div>
           ) : (
             <div className="space-y-4">
-              {requirements.map((req) => (
+              {filteredRequirements.map((req) => (
                 <div key={req.id} className="card p-6 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
@@ -756,11 +801,24 @@ export default function ProjectDetailPage() {
       {/* Tasks Tab */}
       {activeTab === 'tasks' && (
         <div>
-          {hasAnyPermission(user, ['tasks.create']) && (
-            <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId(''); setShowAddTaskModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
-              <Plus size={20} /><span>新建任務</span>
-            </button>
-          )}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            {hasAnyPermission(user, ['tasks.create']) && (
+              <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId(''); setShowAddTaskModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
+                <Plus size={20} /><span>新建任務</span>
+              </button>
+            )}
+            <div className="relative w-full sm:w-72">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchTask}
+                onChange={(e) => setSearchTask(e.target.value)}
+                placeholder="搜尋任務..."
+                aria-label="搜尋任務"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          </div>
 
           {tasks.length === 0 ? (
             <div className="card p-12 text-center">
@@ -768,9 +826,15 @@ export default function ProjectDetailPage() {
               <h3 className="text-lg font-medium text-gray-900 mb-2">暫無任務</h3>
               <p className="text-gray-500">點擊上方按鈕新增任務</p>
             </div>
+          ) : filteredTasks.length === 0 ? (
+            <div className="card p-12 text-center">
+              <Search size={48} className="mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">無符合「{searchTask}」嘅任務</h3>
+              <p className="text-gray-500">試下其他關鍵字,或清空搜尋框</p>
+            </div>
           ) : (
             <div className="space-y-3">
-              {tasks.map((task) => (
+              {filteredTasks.map((task) => (
                 <div key={task.id} className="card p-5">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -860,20 +924,39 @@ export default function ProjectDetailPage() {
       {/* Bugs Tab */}
       {activeTab === 'bugs' && (
         <div>
-          {hasAnyPermission(user, ['bugs.create']) && (
-            <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 mb-6 w-full sm:w-auto justify-center">
-              <Plus size={20} /><span>新建缺陷</span>
-            </button>
-          )}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            {hasAnyPermission(user, ['bugs.create']) && (
+              <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
+                <Plus size={20} /><span>新建缺陷</span>
+              </button>
+            )}
+            <div className="relative w-full sm:w-72">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchBug}
+                onChange={(e) => setSearchBug(e.target.value)}
+                placeholder="搜尋缺陷..."
+                aria-label="搜尋缺陷"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          </div>
           {bugs.length === 0 ? (
             <div className="card p-12 text-center">
               <AlertTriangle size={48} className="mx-auto text-gray-400 mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">暫無缺陷</h3>
               <p className="text-gray-500">點擊上方按鈕回報缺陷</p>
             </div>
+          ) : filteredBugs.length === 0 ? (
+            <div className="card p-12 text-center">
+              <Search size={48} className="mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">無符合「{searchBug}」嘅缺陷</h3>
+              <p className="text-gray-500">試下其他關鍵字,或清空搜尋框</p>
+            </div>
           ) : (
             <div className="space-y-3">
-              {bugs.map((bug) => (
+              {filteredBugs.map((bug) => (
                 <div key={bug.id} className="card p-5">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
