@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Grip, Bot, User } from 'lucide-react'
 import { requirementApi, taskApi, projectApi } from '../utils/api'
 import type { Requirement, Task } from '../types'
-import AddTaskModal, { type RecommendedAgent, type MemberOption } from './AddTaskModal'
+import AddTaskModal, { type MemberOption } from './AddTaskModal'
+import { useTaskRecommendation } from '../hooks/useTaskRecommendation'
 
 interface ProjectKanbanProps {
   projectId: string
@@ -44,7 +45,6 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
   const [newTaskParticipantIds, setNewTaskParticipantIds] = useState<string[]>([])
   const [newTaskParentId, setNewTaskParentId] = useState('')
   const [autoAssignAgent, setAutoAssignAgent] = useState(true)
-  const [recommendedAgent, setRecommendedAgent] = useState<RecommendedAgent | null>(null)
   const [members, setMembers] = useState<MemberWithEmail[]>([])
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -53,64 +53,17 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
     loadData()
   }, [projectId])
 
-  // Get recommendation when task title changes (smart-assign panel, mirrors ProjectDetailPage)
-  useEffect(() => {
-    if (newTaskTitle.trim() && newTaskTitle.length >= 3) {
-      const timer = setTimeout(async () => {
-        try {
-          const agentsResponse = await taskApi.getAgentsOverview()
-          const agents = agentsResponse.data.agents || []
-          const keywords = (newTaskTitle + ' ' + newTaskDesc).toLowerCase().match(/\w{2,}/g) || []
-
-          const skillKeywords: Record<string, string[]> = {
-            code_review: ['代碼審查', 'code review', 'review', 'pull request', 'pr', '審視', '審核'],
-            testing: ['測試', 'test', 'unit test', '測試用例', '自動化'],
-            documentation: ['文檔', 'docs', 'readme', 'wiki', '手冊'],
-            bug_analysis: ['bug', 'bug分析', '錯誤', '除錯', 'debug', '問題', '修復'],
-            refactoring: ['重構', 'refactor', '優化'],
-            security_audit: ['安全', 'security', '漏洞', '審計'],
-            performance: ['性能', '效能', '優化', 'slow'],
-            design: ['設計', '架構', 'architecture', '系統設計']
-          }
-
-          let bestAgent: typeof agents[0] | null = null
-          let bestScore = 0
-          let matchedSkills: string[] = []
-
-          for (const agent of agents) {
-            if (agent.activeTasks >= agent.maxConcurrentTasks) continue
-            const score = (agent.skills || []).filter((skill: string) => {
-              const kws = skillKeywords[skill] || []
-              return keywords.some((kw: string) => kws.some((k: string) => k.includes(kw) || kw.includes(k)))
-            }).length
-
-            if (score > bestScore) {
-              bestScore = score
-              bestAgent = agent
-              matchedSkills = (agent.skills || []).filter((skill: string) => {
-                const kws = skillKeywords[skill] || []
-                return keywords.some((kw: string) => kws.some((k: string) => k.includes(kw) || kw.includes(k)))
-              })
-            }
-          }
-
-          if (bestAgent && bestScore > 0) {
-            setRecommendedAgent({ id: bestAgent.id, name: bestAgent.name, skills: matchedSkills })
-            if (autoAssignAgent) {
-              setNewTaskAssignee(bestAgent.id)
-            }
-          } else {
-            setRecommendedAgent(null)
-          }
-        } catch (err) {
-          console.error('Failed to get recommendation:', err)
-        }
-      }, 500)
-      return () => clearTimeout(timer)
-    } else {
-      setRecommendedAgent(null)
-    }
-  }, [newTaskTitle, newTaskDesc])
+  // Sprint 17.1: 抽走 60-line copy-paste 嘅 recommendation useEffect 入
+  // useTaskRecommendation hook(ProjectDetailPage 同時 refactor)。
+  // useCallback 穩定化 onAutoAssign reference,避免 hook 內 useEffect dep
+  // 每 render rerun。
+  const handleAutoAssign = useCallback((agentId: string) => setNewTaskAssignee(agentId), [])
+  const { recommendedAgent } = useTaskRecommendation({
+    title: newTaskTitle,
+    description: newTaskDesc,
+    autoAssignAgent,
+    onAutoAssign: handleAutoAssign,
+  })
 
   const loadData = async () => {
     try {
@@ -246,13 +199,12 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
         }
       }
 
-      setNewTaskTitle('')
+      setNewTaskTitle('')  // Hook 監聽 title.length < 3 → auto-reset recommendedAgent
       setNewTaskDesc('')
       setNewTaskAssignee('')
       setNewTaskParticipantIds([])
       setNewTaskParentId('')
       setSelectedRequirement(null)
-      setRecommendedAgent(null)
       setShowAddTaskModal(false)
       loadData()
     } catch (err) {
@@ -264,12 +216,11 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
 
   const openAddTaskModal = (reqId: string) => {
     setSelectedRequirement(reqId)
-    setNewTaskTitle('')
+    setNewTaskTitle('')  // Hook auto-reset recommendedAgent
     setNewTaskDesc('')
     setNewTaskAssignee('')
     setNewTaskParticipantIds([])
     setNewTaskParentId('')
-    setRecommendedAgent(null)
     setShowAddTaskModal(true)
   }
 
@@ -414,13 +365,12 @@ export default function ProjectKanban({ projectId }: ProjectKanbanProps) {
         open={showAddTaskModal}
         onClose={() => {
           setShowAddTaskModal(false)
-          setNewTaskTitle('')
+          setNewTaskTitle('')  // Hook auto-reset recommendedAgent
           setNewTaskDesc('')
           setNewTaskAssignee('')
           setNewTaskParticipantIds([])
           setNewTaskParentId('')
           setSelectedRequirement(null)
-          setRecommendedAgent(null)
         }}
         title={newTaskTitle}
         setTitle={setNewTaskTitle}
