@@ -41,7 +41,7 @@ const SKILL_KEYWORDS: Record<string, string[]> = {
   design: ['設計', '架構', 'architecture', '系統設計'],
 }
 
-interface AgentLike {
+export interface AgentLike {
   id: string
   name: string
   skills?: string[]
