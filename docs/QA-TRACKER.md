@@ -33,7 +33,7 @@
 | US-4.1 | 建任務 | ✅ tasks.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
 | US-4.2 | MyTasks | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-4.3 | Kanban 改狀態 | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-4.4 | 需求↔任務 link | ❌ | ❌ | ❌ | NONE | TBD |
+| US-4.4 | 需求↔任務 link | ✅ tasks.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 6 tests — buildTaskListWhere requirementId filter 3 + resolveTaskProjectId cross-project guard 3) | TBD |
 | US-4.5 | Project Kanban | ❌ | ❌ | ❌ | NONE | TBD |
 | **Epic 5: Bugs** | | | | | | |
 | US-5.1 | 建 Bug | ✅ bugs.test.ts | ❌ | ✅ bugs-fix | **PASS-UNIT + PASS-E2E** 🟢🟢 | TBD |
@@ -89,12 +89,12 @@
 | US 總數 | 50+ |
 | P0 US 過 test | **29/29 (100%)** 🟢 (Sprint 3: 26/29 = 90%) |
 | P0 US 三層 PASS-UNIT + PASS-E2E | **8** (US-1.1, 2.1, 3.1, 4.1, 6.1, 7.3, 9.3, **11.2**) — Sprint 9: +US-11.2 |
-| P0 US PASS-UNIT only | **24** (Sprint 10: +US-3.5) |
+| P0 US PASS-UNIT only | **25** (Sprint 10: +US-4.4) |
 | P0 US PASS-INT only | **3** (US-8.1, 8.2, 9.3 — Sprint 3 closure) |
 | P0 US DEFERRED | **0** 🟢 |
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
-| Unit tests 總數 | **569 pass** (Sprint 10: 549 → 569,+20 — worklogs filter RBAC 9 + requirements rich-text 11) |
+| Unit tests 總數 | **575 pass** (Sprint 10: 549 → 575,+26 — worklogs RBAC 9 + requirements rich-text 11 + tasks requirement link 6) |
 | E2E tests | **52 pass** (Sprint 9: 42 → 52,+10 — 7 sub-list UI + 1 user page UI + 2 reports cost 一致性) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
@@ -242,7 +242,7 @@
 | 2026-06-08 | Sprint 2 關閉 Sprint 1 標 🔴 嘅 US-7.1 + US-9.1 兩個 ship-blocker(0 個 ship-blocker 剩低) |
 | 2026-06-09 | Sprint 4 closure:TD-008 ✅(rate limit + 移除 cache),RG-007 + RG-008 entries,9 個新 unit test |
 | 2026-06-09 | TD-008 進度更新 — 5 個 rate-limit unit test pass,RG-008 regression test 守住 |
-| 2026-06-10 | **Sprint 10 in progress — P0 remaining US test push**:US-6.4(worklogs filter + RBAC gate)由 NONE → PASS-UNIT(9 個 derive test,non-admin 強制 userId + admin departmentId);US-3.5(requirement rich-text)由 NONE → PASS-UNIT(11 個 derive test,Tiptap `<p></p>` normalize + null/undefined round-trip + 複雜 HTML 保持 fidelity);next US-4.4 / 2.4 / 2.3 / 4.5 |
+| 2026-06-10 | **Sprint 10 in progress — P0 remaining US test push**:US-6.4(worklogs filter + RBAC gate)由 NONE → PASS-UNIT(9 個 derive test,non-admin 強制 userId + admin departmentId);US-3.5(requirement rich-text)由 NONE → PASS-UNIT(11 個 derive test,Tiptap `<p></p>` normalize + null/undefined round-trip + 複雜 HTML 保持 fidelity);US-4.4(task ↔ requirement link)由 NONE → PASS-UNIT(6 個 source test,buildTaskListWhere requirementId filter + resolveTaskProjectId cross-project guard);next US-2.4 / 2.3 / 4.5 |
 | 2026-06-09 | **Sprint 6 closure — 7-bug P0 fix sprint**:RG-014,7 個 user-reported bugs 全部 closed;E2E 24→33(+9 bugs-fix),Unit 479→499(+20 helper);新 pages:BugsPage/BugDetailPage/CreateBugModal;AttachmentsTab + RichTextEditor + ProjectsPage card 全部改;新 backend `GET /api/bugs/:id`;sidebar 加「全部缺陷」link |
 | 2026-06-09 | **Sprint 7 closure — ProjectDetailPage alignment**:ProjectDetailPage 嘅 Tasks/Bugs tabs 全 feature parity with RequirementDetailPage(加咗 新增任務 button、inline status select、Clock work-log、Bot AI 自動分配、WorkLogModal、智能分配 panel);所有 modal `max-w-2xl` + `RichTextEditor`;bug status `closed` 移除;tasks 加 `testing` option;Requirement 新增/編輯 modal 都改 `max-w-2xl` 對齊;helpers 對齊 Req 嘅 `bg-gray-100`/`高`/`嚴重`;TypeScript clean,33/33 E2E pass,499/499 unit pass,frontend-only refactor 冇 backend regression;Plan: `/Users/davidchu/.claude/plans/cozy-wandering-quiche.md` |
 | 2026-06-09 | **Sprint 8 closure — Server-side Pagination**:4 個 list endpoint(projects/requirements/tasks/bugs)+ 5 個 list page 全部接 server-side pagination;新 `computePagination` 共用 helper(default 20 / max 100)鏡 worklogs `limit=-1` 模式;response 向後兼容(keep 原 array 名 + add `totalCount`/`page`/`pageSize`/`totalPages`);新 `<Pagination>` controlled component;status/project filter 改 server-side;pagination helper 17 個 unit test + 9 個 E2E;Unit 499→516(+17),E2E 33→42(+9 pagination E2E),Frontend `tsc` clean,Frontend `vite build` clean |
