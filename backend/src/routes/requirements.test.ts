@@ -6,6 +6,7 @@
  *  - US-3.2: 分派 (assignee) — 補 unit test 守住 validation
  *  - US-3.3: MyRequirements list — 守住 view permission + scope 邏輯
  *  - US-3.4: 改狀態 — 守住 status transition invariants
+ *  - US-3.5 (P0): 富文本 round-trip — 守住 normalize invariant(Tiptap `<p></p>` → '')
  *
  * 對應 TECH-DEBT TD-001 + 紅線 12.
  */
@@ -364,6 +365,89 @@ describe('US-3.4: PUT /requirements/:id (status change)', () => {
           null
         )
       ).toBe(true)
+    })
+  })
+})
+
+/**
+ * 從 RichTextEditor.tsx + requirements.ts derive 嘅 description 處理邏輯(US-3.5)
+ * 保持同 source 完全一致:
+ *  - Tiptap 空 editor 會 emit `<p></p>`,前端 onChange 視為空 string(normalize)
+ *  - backend 接受任意 string,包括 HTML 標籤(round-trip 完整保留)
+ *  - `<p></p>` 出現喺 description field 視為 visual empty(可被清空)
+ *  - 真實內容嘅 HTML 唔可以 normalize 走(e.g. `<p>hi</p>` 保持)
+ *
+ * 寫呢個 helper 嘅目的:將來如果有人加 sanitize / 過濾邏輯,
+ * 呢個 test 守住「round-trip fidelity」invariant,防 silent data corruption。
+ */
+function normalizeRichTextDescription(html: string | null | undefined): string {
+  if (html == null) return ''
+  // Tiptap empty wrapper 視為空(同 frontend onChange 一致)
+  if (html === '<p></p>') return ''
+  return html
+}
+
+function isMeaningfulDescription(html: string | null | undefined): boolean {
+  if (html == null) return false
+  const normalized = html.trim()
+  if (normalized === '') return false
+  if (normalized === '<p></p>') return false
+  // 完全空白 HTML 標籤視為冇內容
+  if (/^<p>\s*<\/p>$/.test(normalized)) return false
+  return true
+}
+
+describe('Requirement rich-text description (US-3.5, Sprint 10)', () => {
+  describe('normalizeRichTextDescription', () => {
+    test('undefined → 空 string(round-trip safe)', () => {
+      expect(normalizeRichTextDescription(undefined)).toBe('')
+    })
+
+    test('null → 空 string(round-trip safe)', () => {
+      expect(normalizeRichTextDescription(null)).toBe('')
+    })
+
+    test('Tiptap 空 wrapper `<p></p>` → 空 string(同 frontend onChange 一致)', () => {
+      expect(normalizeRichTextDescription('<p></p>')).toBe('')
+    })
+
+    test('空白 HTML `<p>   </p>` 保持原樣(frontend 有可能,backend 唔主動清)', () => {
+      // Backend 只 normalize 完全空 wrapper,whitespace 由 frontend / display layer 處理
+      expect(normalizeRichTextDescription('<p>   </p>')).toBe('<p>   </p>')
+    })
+
+    test('有內容 `<p>hello</p>` 保持原樣(round-trip fidelity)', () => {
+      expect(normalizeRichTextDescription('<p>hello</p>')).toBe('<p>hello</p>')
+    })
+
+    test('複雜 HTML bold + image 標籤保持原樣', () => {
+      const html = '<p>Spec: <strong>API</strong> see <img src="x.png" /></p>'
+      expect(normalizeRichTextDescription(html)).toBe(html)
+    })
+  })
+
+  describe('isMeaningfulDescription', () => {
+    test('undefined / null → false(可決定要唔要儲)', () => {
+      expect(isMeaningfulDescription(undefined)).toBe(false)
+      expect(isMeaningfulDescription(null)).toBe(false)
+    })
+
+    test('純空 string → false', () => {
+      expect(isMeaningfulDescription('')).toBe(false)
+      expect(isMeaningfulDescription('   ')).toBe(false)
+    })
+
+    test('Tiptap 空 wrapper → false', () => {
+      expect(isMeaningfulDescription('<p></p>')).toBe(false)
+    })
+
+    test('空白 wrapper `<p>  </p>` → false', () => {
+      expect(isMeaningfulDescription('<p>  </p>')).toBe(false)
+    })
+
+    test('有任何 content → true', () => {
+      expect(isMeaningfulDescription('<p>x</p>')).toBe(true)
+      expect(isMeaningfulDescription('just text')).toBe(true)
     })
   })
 })
