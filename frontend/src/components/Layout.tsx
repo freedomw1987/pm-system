@@ -252,9 +252,9 @@ export default function Layout() {
         <Link
           to="/chat"
           title="AI 助手"
-          className="group fixed bottom-6 right-6 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 sm:h-14 sm:w-14"
+          className="group fixed bottom-3 right-3 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14"
         >
-          <Bot size={24} className="sm:h-7 sm:w-7" />
+          <Bot size={20} className="sm:h-7 sm:w-7" />
           <span className="pointer-events-none absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-md transition-opacity group-hover:opacity-100">
             AI 助手
           </span>
