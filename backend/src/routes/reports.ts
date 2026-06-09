@@ -26,12 +26,15 @@ const reportRoutes = new Elysia({ prefix: '/reports' })
     }
 
     const workLogs = await prisma.workLog.findMany({
+      // Sprint 9 fix: use same where.OR pattern as worklogs.ts:40-45
+      // so the cost report matches the WorkLogs page exactly.
+      // Counts worklogs on tasks-with-requirements, tasks-without-requirements,
+      // tasks-whose-requirement-is-in-another-project, and bugs.
       where: {
-        task: {
-          requirements: {
-            some: { requirement: { projectId: query.projectId } }
-          }
-        }
+        OR: [
+          { task: { projectId: query.projectId } },
+          { bug: { projectId: query.projectId } },
+        ],
       },
       include: {
         user: { select: { id: true, name: true, email: true } },
@@ -87,12 +90,7 @@ const reportRoutes = new Elysia({ prefix: '/reports' })
     }
 
     const project = await prisma.project.findUnique({
-      where: { id: query.projectId },
-      include: {
-        requirements: {
-          include: { tasks: true }
-        }
-      }
+      where: { id: query.projectId }
     })
 
     if (!project) {
@@ -100,19 +98,29 @@ const reportRoutes = new Elysia({ prefix: '/reports' })
       return { error: { code: 'NOT_FOUND', message: 'Project not found' } }
     }
 
-    const totalRequirements = project.requirements.length
-    const completedRequirements = project.requirements.filter(r => r.status === 'completed').length
-
-    const allTasks = project.requirements.flatMap(r => r.tasks)
-    const totalTasks = allTasks.length
-    const completedTasks = allTasks.filter(t => t.status === 'completed').length
-
-    const taskIds = allTasks.map(t => t.id).filter(Boolean)
-    const bugs = taskIds.length > 0
-      ? await prisma.bug.findMany({ where: { taskId: { in: taskIds } } })
-      : []
-    const openBugs = bugs.filter(b => b.status === 'open' || b.status === 'in_progress').length
-    const resolvedBugs = bugs.filter(b => b.status === 'resolved' || b.status === 'closed').length
+    // Sprint 9 fix: query requirements / tasks / bugs directly by projectId
+    // (previously: only counted tasks linked to a requirement, and only bugs
+    // linked to those tasks). Now matches the same shape as the cost report
+    // and the WorkLogs page.
+    const [
+      totalRequirements,
+      completedRequirements,
+      totalTasks,
+      completedTasks,
+      totalBugs,
+      openBugs,
+      resolvedBugs,
+    ] = await Promise.all([
+      prisma.requirement.count({ where: { projectId: query.projectId } }),
+      prisma.requirement.count({ where: { projectId: query.projectId, status: 'completed' } }),
+      prisma.task.count({ where: { projectId: query.projectId } }),
+      prisma.task.count({ where: { projectId: query.projectId, status: 'completed' } }),
+      prisma.bug.count({ where: { projectId: query.projectId } }),
+      prisma.bug.count({ where: { projectId: query.projectId, status: { in: ['open', 'in_progress'] } } }),
+      // Sprint 9 fix: bug status enum is 4 options (open/in_progress/resolved/verified)
+      // — drop the legacy 'closed' value (Sprint 7 alignment).
+      prisma.bug.count({ where: { projectId: query.projectId, status: { in: ['resolved', 'verified'] } } }),
+    ])
 
     return {
       project: { id: project.id, name: project.name },
@@ -122,7 +130,7 @@ const reportRoutes = new Elysia({ prefix: '/reports' })
       totalTasks,
       completedTasks,
       tasksProgress: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
-      totalBugs: bugs.length,
+      totalBugs,
       openBugs,
       resolvedBugs
     }

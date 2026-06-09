@@ -1,6 +1,6 @@
 # PM System — Test Coverage Report
 
-> **Status**: 2026-06-08 snapshot
+> **Status**: 2026-06-09 snapshot
 > **Method**: `find . -name "*.test.*" -not -path "*/node_modules/*"` 掃 source tree
 
 ---
@@ -13,10 +13,10 @@
 | Backend Integration | 0 | 0 | — |
 | Frontend Unit (`frontend/src/**/*.test.ts`) | 1 | 1 | `utils/authRefresh.test.ts` |
 | Frontend Component | 0 | 0 | — |
-| E2E (Playwright / Cypress) | 2 | 13 | critical path + RBAC negative (US-7.3) |
-| **Total** | **7** | **~60** | **~35% coverage (rough estimate)** |
+| E2E (Playwright / Cypress) | 4 | 29 | critical path + RBAC negative (US-7.3) + profile (US-1.4) + bugs-fix (7 bugs P0) |
+| **Total** | **9** | **~76** | **~45% coverage (rough estimate)** |
 
-### E2E test files (2)
+### E2E test files (4)
 
 5. `e2e/tests/critical-path.spec.ts` — 3 tests(2026-06-08 加)
 6. `e2e/tests/rbac-negative.spec.ts` — **10 tests**(2026-06-08 加,US-7.3):
@@ -27,6 +27,23 @@
    - 已知 bug:non-existent UUID token → 500(要 fix,見 TECH-DEBT)
    - positive control:admin 同一 endpoint → 200
    - developer 刪他人 worklog → 403(worklogs.delete_all gate)
+7. `e2e/tests/profile.spec.ts` — **7 tests**(2026-06-09 加,US-1.4):
+   - render user info(name / email / role)
+   - unauthenticated user → redirect /login(ProtectedRoute)
+   - 兩個 password input 嘅 show/hide toggle 都 work
+   - 新密碼太短 → client-side validation error(繞過 HTML5 minLength)
+   - 確認密碼不符 → client-side validation error
+   - 錯誤 currentPassword → server error 400 INVALID_PASSWORD
+   - happy path:改密碼 → 新密碼可登入 → 還原密碼
+8. `e2e/tests/bugs-fix.spec.ts` — **9 tests**(2026-06-09 加,7-bug P0 sprint):
+   - **Bug #1/#2** — 全部缺陷列表有「新建缺陷」button + 項目 filter dropdown
+   - **Bug #3** — click bug row 跳去 /bugs/:id(BugDetailPage)
+   - **Bug #4** — 編輯缺陷 → save 即時更新 title(用 response patch,無需 reload)
+   - **Bug #5** — 附件 image 有 <img> preview + lightbox modal + 下載 header 帶 RFC 5987 filename*
+   - **Bug #6/#7** — CreateBugModal 有「指派給誰」dropdown + 揀項目後 enable
+   - **Bug #7 happy path** — 完整 create flow:title/severity/project/assignee → 喺 list 出現 → cleanup
+   - **Bug #8** — Project card 任何位 click 都跳去 detail(唔只係 h3)
+   - **Bug #8 regression** — Edit/Delete button click 唔 navigate(保留 modal)
 
 ### Backend test files (4)
 
@@ -106,6 +123,7 @@
 | Backend route test coverage | > 80% | ~25% | 🟡 |
 | Frontend critical path test | > 50% | ~10% | 🔴 |
 | E2E critical paths | 至少 3 條 | **3** | 🟢 |
+| E2E US-1.4 (change password) | full | **7 tests** | 🟢 |
 | Regression test for fixed bugs | 100% (RG-XXX) | 40% (1/5) | 🟡 |
 | 整體 % (lines covered) | > 70% | unknown(未跑 nyc/c8) | 🔴 |
 
@@ -150,3 +168,4 @@
 | 2026-06-08 | Sprint 1 補 unit test (3 份,42 tests) |
 | 2026-06-08 | Sprint 1 補 E2E (1 份,3 tests) — Playwright + critical path |
 | 2026-06-08 | Sprint 1 補 E2E RBAC negative (1 份,10 tests) — US-7.3 真 HTTP level 守住 |
+| 2026-06-09 | Sprint 1 補 E2E profile (1 份,7 tests) — US-1.4 改密碼真 E2E + 揭咗 2 個 bug(ProfilePage URL + backend derive 唔覆蓋 /auth/*)|

@@ -1,12 +1,13 @@
 import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
+import { computePagination } from '../utils/pagination'
 
 const requirementRoutes = new Elysia({ prefix: '/requirements' })
   // Get all requirements (filtered by project access)
-  .get('/', async ({ user }) => {
+  .get('/', async ({ query, user }) => {
     if (!user) {
-      return { requirements: [] }
+      return { requirements: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 1 }
     }
 
     const canViewRequirements = hasPermission(user, 'requirements.view') || user.role === 'admin' || user.role === 'pm'
@@ -17,18 +18,31 @@ const requirementRoutes = new Elysia({ prefix: '/requirements' })
           select: { projectId: true }
         }).then(r => r.map(m => m.projectId))
 
+    const where = { projectId: { in: projectIds } }
+
+    const totalCount = await prisma.requirement.count({ where })
+    const pagination = computePagination(query as { page?: string; pageSize?: string; limit?: string }, totalCount)
+
     const requirements = await prisma.requirement.findMany({
-      where: { projectId: { in: projectIds } },
+      where,
       include: {
         project: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
         assignee: { select: { id: true, name: true } },
         _count: { select: { tasks: true } }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      ...(pagination.skip ? { skip: pagination.skip } : {}),
+      ...(pagination.take !== undefined ? { take: pagination.take } : {})
     })
 
-    return { requirements }
+    return {
+      requirements,
+      totalCount,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalPages: pagination.totalPages
+    }
   })
   // Get single requirement
   .get('/:id', async ({ params, set, user }) => {

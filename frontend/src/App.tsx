@@ -10,6 +10,8 @@ import RequirementDetailPage from './pages/RequirementDetailPage'
 import MyRequirementsPage from './pages/MyRequirementsPage'
 import MyTasksPage from './pages/MyTasksPage'
 import MyBugsPage from './pages/MyBugsPage'
+import BugsPage from './pages/BugsPage'
+import BugDetailPage from './pages/BugDetailPage'
 import WorkLogsPage from './pages/WorkLogsPage'
 import ReportsPage from './pages/ReportsPage'
 import UsersPage from './pages/UsersPage'
@@ -58,6 +60,8 @@ function App() {
             <Route path="my-requirements" element={<MyRequirementsPage />} />
             <Route path="my-tasks" element={<MyTasksPage />} />
             <Route path="my-bugs" element={<MyBugsPage />} />
+            <Route path="bugs" element={<BugsPage />} />
+            <Route path="bugs/:id" element={<BugDetailPage />} />
             <Route path="work-logs" element={<WorkLogsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="users" element={<UsersPage />} />

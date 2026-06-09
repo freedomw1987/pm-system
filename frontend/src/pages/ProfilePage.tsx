@@ -29,7 +29,7 @@ export default function ProfilePage() {
 
     setSaving(true)
     try {
-      const res = await fetch('/api/auth/change-password', {
+      const res = await fetch('/auth/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

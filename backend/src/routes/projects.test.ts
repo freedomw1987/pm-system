@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, test } from 'bun:test'
+import { computePagination } from '../utils/pagination'
 
 // ─── Pure helpers derived from projects.ts ───────────────────────────────────
 
@@ -255,5 +256,80 @@ describe('canAccessProject (跨 US-2.x access check)', () => {
         'd-1'
       )
     ).toBe(false)
+  })
+})
+
+// ─── US-7.x Sprint 9: GET /:id/requirements (paginated sub-route) ───────────
+
+/**
+ * 從 projects.ts:157-198 derive 嘅 response shape invariant
+ * Pure helper: takes totalCount + query, returns the paginated response
+ * exactly as the route would, given a sample requirements list.
+ */
+function paginatedRequirementsResponse(
+  totalCount: number,
+  query: { page?: string; pageSize?: string; limit?: string },
+  requirements: Array<{ id: string; title: string }>
+) {
+  const pagination = computePagination(query, totalCount)
+  const skip = pagination.skip ?? 0
+  const take = pagination.take ?? pagination.pageSize
+  const items = requirements.slice(skip, skip + take)
+  return {
+    requirements: items,
+    totalCount,
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+    totalPages: pagination.totalPages,
+  }
+}
+
+function makeReqs(n: number) {
+  return Array.from({ length: n }, (_, i) => ({ id: `req-${i}`, title: `R${i}` }))
+}
+
+describe('US-7.x Sprint 9: GET /:id/requirements paginated response', () => {
+  test('default page=1, pageSize=20 returns first 20 of 25', () => {
+    const r = paginatedRequirementsResponse(25, {}, makeReqs(25))
+    expect(r.requirements).toHaveLength(20)
+    expect(r.totalCount).toBe(25)
+    expect(r.page).toBe(1)
+    expect(r.pageSize).toBe(20)
+    expect(r.totalPages).toBe(2)
+  })
+
+  test('page=2 returns the next slice, no overlap with page 1', () => {
+    const all = makeReqs(25)
+    const p1 = paginatedRequirementsResponse(25, { page: '1', pageSize: '20' }, all)
+    const p2 = paginatedRequirementsResponse(25, { page: '2', pageSize: '20' }, all)
+    expect(p1.requirements[0].id).toBe('req-0')
+    expect(p2.requirements[0].id).toBe('req-20')
+    expect(p2.requirements).toHaveLength(5)
+    const p1Ids = new Set(p1.requirements.map(r => r.id))
+    for (const r of p2.requirements) {
+      expect(p1Ids.has(r.id)).toBe(false)
+    }
+  })
+
+  test('pageSize=200 caps at MAX_PAGE_SIZE=100', () => {
+    const r = paginatedRequirementsResponse(500, { pageSize: '200' }, makeReqs(500))
+    expect(r.pageSize).toBe(100)
+    expect(r.requirements).toHaveLength(100)
+  })
+
+  test('limit=-1 returns all requirements in a single page (Excel export)', () => {
+    const all = makeReqs(33)
+    const r = paginatedRequirementsResponse(33, { limit: '-1' }, all)
+    expect(r.requirements).toHaveLength(33)
+    expect(r.page).toBe(1)
+    expect(r.totalPages).toBe(1)
+    expect(r.pageSize).toBe(33)
+  })
+
+  test('totalCount=0 still yields a valid response (1 empty page)', () => {
+    const r = paginatedRequirementsResponse(0, {}, [])
+    expect(r.requirements).toEqual([])
+    expect(r.totalCount).toBe(0)
+    expect(r.totalPages).toBe(1)
   })
 })

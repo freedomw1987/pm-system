@@ -1,6 +1,8 @@
 import { Elysia, t } from 'elysia'
 import bcrypt from 'bcryptjs'
 import { hasPermission } from '../middleware/permission'
+import { prisma } from '../utils/prisma'
+import { computePagination } from '../utils/pagination'
 
 const userRoutes = new Elysia({ prefix: '/users' })
   // Get all users (for filter dropdowns)
@@ -11,14 +13,13 @@ const userRoutes = new Elysia({ prefix: '/users' })
       return { error: { code: 'UNAUTHORIZED', message: 'Login required' } }
     }
 
-    const { prisma } = await import('../utils/prisma')
     const users = await prisma.user.findMany({
       select: { id: true, name: true },
       orderBy: { name: 'asc' }
     })
     return { users }
   })
-  // Get all users
+  // Get all users (paginated — US-7.x Sprint 9)
   .get('/', async ({ query, set, user }) => {
     // Check if user can view all users
     const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'users.view_all'))
@@ -30,7 +31,6 @@ const userRoutes = new Elysia({ prefix: '/users' })
 
     const { departmentId } = query as { departmentId?: string }
 
-    const { prisma } = await import('../utils/prisma')
     const where: any = {}
 
     // If not admin or view_all, only show own user
@@ -41,6 +41,10 @@ const userRoutes = new Elysia({ prefix: '/users' })
     if (departmentId && canViewAll) {
       where.departmentId = departmentId
     }
+
+    const totalCount = await prisma.user.count({ where })
+
+    const pagination = computePagination(query as { page?: string; pageSize?: string; limit?: string }, totalCount)
 
     const users = await prisma.user.findMany({
       where,
@@ -66,7 +70,9 @@ const userRoutes = new Elysia({ prefix: '/users' })
         department: { select: { id: true, name: true } },
         createdAt: true
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      ...(pagination.skip ? { skip: pagination.skip } : {}),
+      ...(pagination.take !== undefined ? { take: pagination.take } : {})
     })
 
     return {
@@ -85,7 +91,11 @@ const userRoutes = new Elysia({ prefix: '/users' })
             role: m.role
           }))
         } : {})
-      }))
+      })),
+      totalCount,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalPages: pagination.totalPages
     }
   })
   // Create user

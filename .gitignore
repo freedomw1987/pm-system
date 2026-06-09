@@ -11,4 +11,5 @@ docs/_meta/
 docs/*-user-manual.html
 
 # PM-System client release artifacts (built by scripts/build-release.sh)
+deploy/.env
 deploy/dist/

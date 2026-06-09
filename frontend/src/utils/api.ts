@@ -75,7 +75,7 @@ export const authApi = {
 
 // User API
 export const userApi = {
-  list: (params?: { departmentId?: string }) =>
+  list: (params?: { departmentId?: string; page?: number; pageSize?: number; limit?: number }) =>
     api.get('/users', params ? { params } : undefined),
   listSimple: () => api.get('/users/list'),
   create: (data: { email: string; name: string; password: string; role?: string; departmentId?: string }) =>
@@ -107,7 +107,7 @@ export const departmentApi = {
 
 // Project API
 export const projectApi = {
-  list: (params?: { departmentId?: string }) =>
+  list: (params?: { departmentId?: string; page?: number; pageSize?: number; limit?: number }) =>
     api.get('/projects', params ? { params } : undefined),
   create: (data: { name: string; description?: string; departmentId?: string }) =>
     api.post('/projects', data),
@@ -126,8 +126,10 @@ export const projectApi = {
 
 // Requirement API
 export const requirementApi = {
-  list: (projectId: string) => api.get(`/projects/${projectId}/requirements`),
-  listAll: () => api.get('/requirements'),
+  list: (projectId: string, params?: { page?: number; pageSize?: number; limit?: number }) =>
+    api.get(`/projects/${projectId}/requirements`, params ? { params } : undefined),
+  listAll: (params?: { page?: number; pageSize?: number; limit?: number }) =>
+    api.get('/requirements', params ? { params } : undefined),
   get: (id: string) => api.get(`/requirements/${id}`),
   create: (projectId: string, data: { title: string; description?: string; priority?: string; assigneeId?: string }) =>
     api.post(`/projects/${projectId}/requirements`, data),
@@ -138,7 +140,7 @@ export const requirementApi = {
 
 // Task API
 export const taskApi = {
-  list: (params?: { projectId?: string; status?: string; assigneeId?: string; requirementId?: string }) =>
+  list: (params?: { projectId?: string; status?: string; assigneeId?: string; requirementId?: string; page?: number; pageSize?: number; limit?: number }) =>
     api.get('/tasks', { params }),
   create: (data: { title: string; description?: string; assigneeId?: string; assigneeIds?: string[]; participantIds?: string[]; parentTaskId?: string | null; requirementIds?: string[]; estimatedHours?: number; projectId?: string }) =>
     api.post('/tasks', data),
@@ -159,8 +161,9 @@ export const taskApi = {
 
 // Bug API
 export const bugApi = {
-  list: (params?: { taskId?: string; status?: string; reporterId?: string; assigneeId?: string; requirementId?: string; projectId?: string }) =>
+  list: (params?: { taskId?: string; status?: string; reporterId?: string; assigneeId?: string; requirementId?: string; projectId?: string; page?: number; pageSize?: number; limit?: number }) =>
     api.get('/bugs', { params }),
+  get: (id: string) => api.get(`/bugs/${id}`),
   create: (data: { title: string; description?: string; taskId?: string; severity?: string; assigneeId?: string; requirementId?: string; projectId?: string }) =>
     api.post('/bugs', data),
   update: (id: string, data: { title?: string; status?: string; description?: string; severity?: string; assigneeId?: string | null }) =>
@@ -202,7 +205,7 @@ export const reportApi = {
 
 // Attachment API
 export const attachmentApi = {
-  upload: (file: File, entityType: 'requirement' | 'task' | 'project' | 'wiki', entityId: string) => {
+  upload: (file: File, entityType: 'requirement' | 'task' | 'project' | 'wiki' | 'bug', entityId: string) => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('entityType', entityType)

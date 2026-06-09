@@ -6,12 +6,20 @@ import { hasAnyPermission } from '../utils/permissions'
 import type { Requirement, Project } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
+import Pagination from '../components/Pagination'
+import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 export default function MyRequirementsPage() {
   const { user } = useAuth()
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
+
+  // Pagination (US-7.x)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
 
   // ── Add requirement ──────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false)
@@ -29,13 +37,16 @@ export default function MyRequirementsPage() {
   const [editPriority, setEditPriority] = useState('')
   const [isEditing, setIsEditing] = useState(false)
 
-  useEffect(() => { loadRequirements() }, [])
+  useEffect(() => { loadRequirements() }, [page, pageSize])
 
   const loadRequirements = async () => {
+    setIsLoading(true)
     try {
       // Backend already filters by project access for non-admins
-      const res = await requirementApi.listAll()
+      const res = await requirementApi.listAll({ page, pageSize })
       setRequirements(res.data.requirements)
+      setTotalCount(res.data.totalCount ?? res.data.requirements.length)
+      setTotalPages(res.data.totalPages ?? 1)
     } catch (err) {
       console.error(err)
     } finally {
@@ -232,6 +243,21 @@ export default function MyRequirementsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Pagination (US-7.x) */}
+      {!isLoading && totalCount > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => {
+            setPageSize(s)
+            setPage(1)
+          }}
+        />
       )}
 
       {/* Add Modal */}

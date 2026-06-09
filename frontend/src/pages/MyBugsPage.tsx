@@ -4,6 +4,8 @@ import { AlertCircle, Bug, CheckCircle, Clock, PlayCircle } from 'lucide-react'
 import { bugApi, workLogApi } from '../utils/api'
 import type { Bug as BugType } from '../types'
 import clsx from 'clsx'
+import Pagination from '../components/Pagination'
+import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 type BugFilter = 'all' | 'open' | 'in_progress' | 'resolved' | 'verified'
 type BugStatus = BugType['status']
@@ -29,16 +31,34 @@ export default function MyBugsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  // Pagination (US-7.x) — server-side status filter
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+
+  // Reset to page 1 whenever the status filter changes
+  useEffect(() => {
+    setPage(1)
+  }, [filter])
+
   useEffect(() => {
     loadBugs()
-  }, [])
+  }, [filter, page, pageSize])
 
   const loadBugs = async () => {
     setIsLoading(true)
     setError('')
     try {
-      const response = await bugApi.list()
+      const params: { status?: string; page: number; pageSize: number } = {
+        page,
+        pageSize,
+      }
+      if (filter !== 'all') params.status = filter
+      const response = await bugApi.list(params)
       setBugs(response.data.bugs || [])
+      setTotalCount(response.data.totalCount ?? response.data.bugs?.length ?? 0)
+      setTotalPages(response.data.totalPages ?? 1)
     } catch (err) {
       console.error('Failed to load bugs:', err)
       setError('載入缺陷失敗，請稍後再試')
@@ -47,10 +67,8 @@ export default function MyBugsPage() {
     }
   }
 
-  const filteredBugs = bugs.filter(bug => {
-    if (filter === 'all') return true
-    return bug.status === filter
-  })
+  // US-7.x: server-side filter — returned list is already filtered
+  const filteredBugs = bugs
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -156,7 +174,7 @@ export default function MyBugsPage() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 lg:mb-8">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">我的缺陷</h1>
-          <p className="text-gray-500 mt-1">顯示可處理的缺陷，共 {bugs.length} 個</p>
+          <p className="text-gray-500 mt-1">顯示可處理的缺陷，共 {totalCount} 個</p>
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
           {(['all', 'open', 'in_progress', 'resolved', 'verified'] as const).map((f) => (
@@ -246,6 +264,21 @@ export default function MyBugsPage() {
             )
           })}
         </div>
+      )}
+
+      {/* Pagination (US-7.x) */}
+      {!isLoading && totalCount > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => {
+            setPageSize(s)
+            setPage(1)
+          }}
+        />
       )}
 
       {workLogBug && (

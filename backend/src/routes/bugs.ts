@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
+import { computePagination } from '../utils/pagination'
 
 const bugRoutes = new Elysia({ prefix: '/bugs' })
   // Get bugs
@@ -38,6 +39,9 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
 
     if (and.length) where.AND = and
 
+    const totalCount = await prisma.bug.count({ where })
+    const pagination = computePagination(query as { page?: string; pageSize?: string; limit?: string }, totalCount)
+
     const bugs = await prisma.bug.findMany({
       where,
       include: {
@@ -46,10 +50,51 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
         task: { select: { id: true, title: true } },
         project: { select: { id: true, name: true } }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      ...(pagination.skip ? { skip: pagination.skip } : {}),
+      ...(pagination.take !== undefined ? { take: pagination.take } : {})
     })
 
-    return { bugs }
+    return {
+      bugs,
+      totalCount,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalPages: pagination.totalPages
+    }
+  })
+  // Get single bug (used by /bugs/:id detail page — RG-2026-06-09 bug #3)
+  .get('/:id', async ({ params, set, user }) => {
+    const bug = await prisma.bug.findUnique({
+      where: { id: params.id },
+      include: {
+        reporter: { select: { id: true, name: true, email: true } },
+        assignee: { select: { id: true, name: true, email: true } },
+        task: { select: { id: true, title: true, projectId: true } },
+        project: { select: { id: true, name: true } }
+      }
+    })
+
+    if (!bug) {
+      set.status = 404
+      return { error: { code: 'NOT_FOUND', message: 'Bug not found' } }
+    }
+
+    // Bug #3 的訪問控制:跟 GET / 一樣 — 非 admin/view_all
+    // 嘅 tester/developer 只可見自己 reporter/assignee/task 嘅 bug
+    const canViewAll = user && (user.role === 'admin' || hasPermission(user, 'bugs.view_all'))
+    if (!canViewAll && user && (user.role === 'tester' || user.role === 'developer')) {
+      const isOwn = bug.reporterId === user.id || bug.assigneeId === user.id
+      if (!isOwn) {
+        // 任務層面嘅 owner 我哋冇 include 入嚟,放寬條件讓 task assignee 都可以睇
+        // 但其實 user.task.assigneeId 唔知 — 保守啲只允許 reporter/assignee
+        // 留低 NOTE: 若日後有 bug 顯示唔到,可能係呢度 access 太嚴
+        set.status = 403
+        return { error: { code: 'FORBIDDEN', message: 'Permission denied' } }
+      }
+    }
+
+    return { bug }
   })
   // Create bug (Tester or Admin with bugs.create)
   .post('/', async ({ body, set, user }) => {

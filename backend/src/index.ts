@@ -3,6 +3,7 @@ import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { swagger } from '@elysiajs/swagger'
 import { authRoutes } from './routes/auth'
+import { authDerive } from './middleware/auth'
 import { userRoutes } from './routes/users'
 import { projectRoutes } from './routes/projects'
 import { requirementRoutes } from './routes/requirements'
@@ -65,54 +66,15 @@ const app = new Elysia()
       // Let Elysia handle it, but we validate size in the route handler
     }
   })
+  // Auth derive apply 喺 app level,令 /auth/* 同 /api/* 都攞到 user
+  // (extract 去 middleware/auth.ts — 2026-06-09 修 /auth/change-password 永遠 401)
+  // 注意: Elysia 嘅 .derive() 只影響「之後」.use() 嘅 routes,所以要放喺
+  // .use(authRoutes) 之前先用得著 /auth/*。
+  .derive(authDerive)
   // Public routes
   .use(authRoutes)
   // Protected routes
   .group('/api', (app) => app
-    .derive(async ({ headers }) => {
-      const authHeader = headers.authorization
-      if (!authHeader?.startsWith('Bearer ')) {
-        return { user: null }
-      }
-      const token = authHeader.slice(7)
-      try {
-        const [userId, role] = token.split(':')
-        if (!userId) return { user: null }
-
-        // Load agent info + validate user actually exists (TD-011 fix)
-        // 唔加呢行 → fake UUID token 過 derive hook,route handler 之後撞
-        // `prisma.user.create / project.create` FK constraint 然後 throw 500
-        const prisma = getPrisma()
-        const dbUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { isAgent: true, agentConfig: true, role: true }
-        })
-        if (!dbUser) {
-          // Token format valid 但 user 真實唔存在 → 視為 auth-missing
-          return { user: null }
-        }
-
-        // Load permissions for this role from DB (no cache — RG-007)
-        // 改完 role permissions 即時生效,唔再需要 docker compose restart
-        const effectiveRole = dbUser.role || role || 'developer'
-        const permissions = await loadRolePermissions(effectiveRole)
-
-        return {
-          user: {
-            id: userId,
-            role: effectiveRole,
-            permissions,
-            isAgent: dbUser.isAgent,
-            agentConfig: dbUser.agentConfig
-          }
-        }
-      } catch (err) {
-        // 任何 prisma / DB error 都要 graceful fall-through
-        // (TD-011 同類 — 唔好 leak 500)
-        console.error('[auth derive] unexpected error:', err)
-        return { user: null }
-      }
-    })
     .use(userRoutes)
     .use(projectRoutes)
     .use(requirementRoutes)

@@ -1,6 +1,6 @@
 # PM System — Regression Guard
 
-> **Status**: 2026-06-08 初版
+> **Status**: 2026-06-09 snapshot(post-7-bug-sprint)
 > **Rule**: 每個 bug fix 必須有 RG-XXX entry(紅線 13)
 
 ---
@@ -306,3 +306,124 @@ describe('RG-XXX: <bug 簡述>', () => {
   - 整體 E2E 17/17 pass(之前 13/17)
 - **Ref**: 同 RG-008 嘅 IP-based rate limit 直接相關,屬 E2E 設計修正
 
+
+### RG-013: /profile 改密碼功能 dead — ProfilePage fetch 錯 URL + backend /auth/* 冇 derive hook(2026-06-09 發現)
+
+- **發現日期**: 2026-06-09(Sprint 1 補 /profile E2E 時撞)
+- **Symptom**: `e2e/tests/profile.spec.ts` 寫 US-1.4 改密碼 happy path,撳 submit 之後
+  永遠見唔到「密碼已成功更新」訊息。直接 curl backend 試:
+  - `POST /api/auth/change-password` → 404(nginx proxy 去 `/api/*` 唔識呢條 path)
+  - `POST /auth/change-password`(帶 valid token)→ **永遠 401** UNAUTHORIZED
+- **Root cause**(兩個 bug):
+  1. **Frontend URL bug**: `frontend/src/pages/ProfilePage.tsx:32` 寫
+     `fetch('/api/auth/change-password', ...)` — 跟 `authApi.ts` pattern 唔一致,
+     `authApi.ts` 全部用 `/auth/login`、`/auth/refresh`(`/auth/*` 唔帶 `/api` prefix)。
+     `nginx.conf` `/api/*` 路由會 proxy 個 path 入 backend,但 backend 嘅 `authRoutes`
+     mount 喺 root(無 prefix),所以 backend route 係 `/auth/change-password`。
+     `/api/auth/change-password` 落 backend 冇 match 嘅 route → 404。
+  2. **Backend derive 缺位**: `backend/src/index.ts` 嘅 auth derive hook 之前只喺
+     `.group('/api', ...)` 入面用,`authRoutes` 喺 `.use(authRoutes)` 喺 root level
+     冇 derive → `/auth/change-password` 嘅 handler 永遠攞 `user = undefined` → 永遠 401。
+     US-1.4 改密碼功能完全 dead,冇人用過所以一直冇人發現。
+- **Fix**:
+  1. ProfilePage.tsx: `fetch('/auth/change-password', ...)` 跟返 `authApi` pattern
+  2. Extract derive 邏輯去 `backend/src/middleware/auth.ts` 做 `authDerive` export,
+     index.ts 喺 `.use(authRoutes)` 之前 `.derive(authDerive)`(app level),令 /auth/* 同 /api/*
+     兩個 group 都用同一份 derive
+  3. `docker compose up -d --build backend frontend` 重新起 container
+- **Prevention**:
+  - E2E spec 必須做 full happy path(唔可以淨做 client-side 嗰半)— 本 bug 之所以 dead 咗
+    就係從來冇 E2E 試過撳 submit 落到後端
+  - Backend 新 route mount 喺 `authRoutes`(root level)**必須** verify derive hook 覆蓋到
+  - 唔可以假設「改完 RBAC / auth 唔影響其他 route」,要 E2E 守住 invariant
+  - 加新 frontend page 嘅 fetch URL review checklist:用 `authApi.ts` 而唔係直接 `fetch`,
+    URL prefix 必須同 nginx 嘅 `location` rule 對得著
+- **驗證**:
+  - `e2e/tests/profile.spec.ts` 7/7 pass(包含 happy path 改密碼 → 新密碼可登入 → 還原)
+  - 整體 E2E 24/24 pass(原本 17 + 新加 7)
+  - 手動 curl `POST /auth/change-password` 帶 valid token → 200(改之前 永遠 401)
+- **Ref**: 新嘅 ProfilePage E2E 係 7 tests 嘅 full coverage
+
+
+### RG-014: 全部缺陷列表(US-5.x)7 個 P0 bug — 2026-06-09 發現/修
+
+- **發現日期**: 2026-06-09(孔德樂 DeLe + 匿名 user 報告)
+- **Scope**: 7 個 bug,全部圍繞「缺陷 / 附件 / 項目 card」三個 area
+- **Symptom 一覽**:
+
+| # | Bug | Severity | Reporter |
+|---|-----|----------|----------|
+| 1 | 全部缺陷列表頁缺少可新增缺陷操作 | medium | 孔德樂 DeLe |
+| 2 | 全部缺陷列表頁無法查看缺陷詳情 | medium | 孔德樂 DeLe |
+| 3 | 編輯缺陷-修改標題和描述,保存後信息未更新 | high | 孔德樂 DeLe |
+| 4 | 全部缺陷列表缺少按項目篩選 | medium | 孔德樂 DeLe |
+| 5 | 附件-已上傳附件圖片未支持預覽,下載也失敗 | medium | 孔德樂 DeLe |
+| 6 | 新增缺陷缺少指派給誰選項,並且缺陷描述裡面無法貼圖片 | high | 孔德樂 DeLe |
+| 7 | 項目點擊卡片無法跳轉到詳情頁,只能通過點擊項目名稱跳轉 | low | 未指定 |
+
+- **Root cause**(分類):
+  - **(1) + (6)**: 從來冇 `/bugs` page — 只有 `/my-bugs`(個人 scope),冇「全部缺陷」入口
+  - **(2)**: 冇 `GET /api/bugs/:id` endpoint,亦冇 `/bugs/:id` 詳情 page
+  - **(3)**: `RequirementDetailPage` 嘅 bug edit 雖然有,但 save 後只行 `loadData()`
+    重 load(無 patch state),會見到 stale data 短暫 flash;真正的 bug 係
+    喺 `MyBugsPage` 冇 edit 入口
+  - **(4)**: `BugsPage` 缺 `projectId` query param + dropdown
+  - **(5)**: 兩重 bug —
+    a) `Content-Disposition: attachment; filename="中文.png"` 冇 RFC 5987 編碼,
+       Chrome 直接丟 filename,`<a href download>` 落唔到原始檔名
+    b) `<a href="/api/attachments/...">` 唔帶 Authorization header(browsers 唔
+       會跨 origin attach header),API 要求 Bearer token
+  - **(6)**: `RequirementDetailPage` 嘅 Create Bug 有 assignee,其他入口(MyBugsPage)冇;
+    描述係 plain `<textarea>`,冇 rich text / image paste
+  - **(7)**: `ProjectsPage` 嘅 project card 整個係 `<div>`,只有 `<h3>` 入面包咗 `<Link>`,
+    撳 card 其他位冇反應
+
+- **Fix**(對應表):
+
+| Bug | Fix |
+|-----|-----|
+| 1 | 新 `frontend/src/pages/BugsPage.tsx` + sidebar 加「全部缺陷」link |
+| 2 | 新 `frontend/src/pages/BugDetailPage.tsx` + backend `GET /api/bugs/:id`(routes/bugs.ts) |
+| 3 | `BugDetailPage` edit handler 用 response `setBug(res.data.bug)` 直接 patch,唔再 reload |
+| 4 | `BugsPage` 加 `<select>` project filter,server-side `params.projectId` + client-side 兜底 filter |
+| 5a | `attachments.ts` 改用 RFC 5987 `filename*=UTF-8''<encoded>` + ASCII fallback |
+| 5b | `AttachmentsTab` 下載改用 `fetch + blob + a.click`,帶 Authorization header |
+| 5c | `AttachmentsTab` 加 `<img src="?inline=1">` thumbnail + lightbox modal |
+| 6 | 新 `CreateBugModal`(Tiptap rich text + image paste + assignee dropdown) |
+| 7 | `ProjectsPage` card 整個包入 `<Link>`,edit/delete button 加 `e.preventDefault()` |
+
+- **Prevention**:
+  - **新 page / route** 一定要有對應 E2E test(否則 RBAC、UI 跳轉、save 行為 全部盲點)
+  - **Backend 下載 endpoint** 一定要用 RFC 5987 filename 編碼,前端 download 一定要 `fetch + blob`,
+    唔可以靠 `<a href>` navigate
+  - **Image upload** 一定要畀 inline preview(`?inline=1` 模式 + lightbox)
+  - **List → Detail 跳轉** 嘅 row 必須係 `<Link>`(唔可以係 `<div onClick>` 偽造)
+  - **List header** 一定要有「新建」button 對應 modal 入口(否則 user 搵唔到 create path)
+  - **List 一定要有 filter** 至少一個維度(project / status / severity)— 否則 5+ 個就 unusable
+  - **Edit 後嘅 state update** 一定要用 response 直接 patch local state,避免
+    「重 load → 短暫 stale → 新 data」嘅 flash
+  - **Rich text editor** 一定要用 Tiptap(StarterKit + Image + Link + Placeholder),唔可以
+    自製 contentEditable(無 paste handler,無 sanitisation,無 undo/redo)
+- **Regression test**: ✅ **2026-06-09 加**(`e2e/tests/bugs-fix.spec.ts` 9 tests):
+  - **bug #1/#2**:`/bugs` page renders,「新建缺陷」button 喺度,項目 filter dropdown 喺度
+  - **bug #3**:click bug row 跳去 `/bugs/:id`,BugDetailPage 有「返回缺陷列表」link
+  - **bug #4**:edit title/description → save → UI 即時 contain new title(用 `main h1` 避開 sidebar 嘅 `PM System` h1 撞 strict mode)
+  - **bug #5**:upload 1x1 PNG → `/api/attachments/:id?inline=1` 返 200 + `image/png` + `filename*=UTF-8''` header
+  - **bug #5 UI**:thumbnail `<img>` render → click 開 lightbox → lightbox 嘅 `<img>` 可見
+  - **bug #6 + #7(create modal)**:有「指派給誰」label + 揀項目後 assignee dropdown 有 options
+  - **bug #6 + #7(happy path)**:title/severity/project/assignee → submit → 綠色 success banner → server 確認 bug 出現 → cleanup
+  - **bug #8**:click card 任何位(右下角「個成員」文字)都跳去 `/projects/:id`
+  - **bug #8 regression**:click 個 card 嘅 edit button → 出 modal,**唔** navigate(用 `e.preventDefault` + `e.stopPropagation`)
+- **驗證**:
+  - `e2e/tests/bugs-fix.spec.ts` **9/9 pass**(8.8s)
+  - 整體 E2E **33/33 pass**(之前 24 + 新加 9)
+  - Backend unit tests **499/499 pass**(冇改 bug test,加咗新 endpoint 但純 add,無 modify)
+  - 全部 frontend 8 個 pages 引用 Tiptap `RichTextEditor` 統一支援 image paste + 4 個現有 caller
+    (Projects / ProjectDetail / RequirementDetail / MyRequirements)零改動,API backward compatible
+- **Ref**:
+  - 新 frontend files:`pages/BugsPage.tsx` + `pages/BugDetailPage.tsx` + `components/CreateBugModal.tsx`
+  - Backend:`backend/src/routes/bugs.ts` 加 `GET /:id` endpoint
+  - Frontend:`components/AttachmentsTab.tsx` 重寫(lightbox + RFC 5987 下載)
+  - Backend:`backend/src/routes/attachments.ts` `GET /:id` 改用 RFC 5987 + `?inline=1` mode
+  - Frontend:`utils/api.ts` `bugApi.get` + `attachmentApi.upload` type 加 'bug'
+  - Layout:`components/Layout.tsx` sidebar 加「全部缺陷」nav item

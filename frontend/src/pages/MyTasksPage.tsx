@@ -5,6 +5,8 @@ import { taskApi, workLogApi } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import type { Task } from '../types'
 import clsx from 'clsx'
+import Pagination from '../components/Pagination'
+import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 type TaskFilter = 'all' | 'pending' | 'in_progress' | 'completed'
 type TaskStatus = Task['status']
@@ -31,16 +33,36 @@ export default function MyTasksPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  // Pagination (US-7.x) — server-side status filter + page/pageSize
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+
+  // Reset to page 1 whenever the status filter changes
+  useEffect(() => {
+    setPage(1)
+  }, [filter])
+
   useEffect(() => {
     if (user?.id) loadTasks()
-  }, [user?.id])
+  }, [user?.id, filter, page, pageSize])
 
   const loadTasks = async () => {
     setIsLoading(true)
     setError('')
     try {
-      const response = await taskApi.list({ assigneeId: user?.id })
+      // US-7.x: status filter is now server-side so pagination returns the right slice
+      const params: { assigneeId?: string; status?: string; page: number; pageSize: number } = {
+        page,
+        pageSize,
+      }
+      if (user?.id) params.assigneeId = user.id
+      if (filter !== 'all') params.status = filter
+      const response = await taskApi.list(params)
       setTasks(response.data.tasks || [])
+      setTotalCount(response.data.totalCount ?? response.data.tasks?.length ?? 0)
+      setTotalPages(response.data.totalPages ?? 1)
     } catch (err) {
       console.error('Failed to load tasks:', err)
       setError('載入任務失敗，請稍後再試')
@@ -49,10 +71,9 @@ export default function MyTasksPage() {
     }
   }
 
-  const filteredTasks = tasks.filter(task => {
-    if (filter === 'all') return true
-    return task.status === filter
-  })
+  // When server-side filter is active, the returned list is already filtered.
+  // Keeping the alias for downstream JSX readability.
+  const filteredTasks = tasks
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -143,7 +164,7 @@ export default function MyTasksPage() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 lg:mb-8">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">我的任務</h1>
-          <p className="text-gray-500 mt-1">顯示目前指派給您的任務，共 {tasks.length} 個</p>
+          <p className="text-gray-500 mt-1">顯示目前指派給您的任務，共 {totalCount} 個</p>
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
           {(['all', 'pending', 'in_progress', 'completed'] as const).map((f) => (
@@ -257,6 +278,21 @@ export default function MyTasksPage() {
             )
           })}
         </div>
+      )}
+
+      {/* Pagination (US-7.x) */}
+      {!isLoading && totalCount > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => {
+            setPageSize(s)
+            setPage(1)
+          }}
+        />
       )}
 
       {workLogTask && (

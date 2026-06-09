@@ -6,6 +6,8 @@ import type { Project } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
 import { hasAnyPermission } from '../utils/permissions'
+import Pagination from '../components/Pagination'
+import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 interface Department {
   id: string
@@ -26,6 +28,12 @@ export default function ProjectsPage() {
   // Department filter
   const [filterDepartmentId, setFilterDepartmentId] = useState('')
 
+  // Pagination (US-7.x)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+
   // Edit modal
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
@@ -42,19 +50,34 @@ export default function ProjectsPage() {
     loadDepartments()
   }, [])
 
+  // Reset to page 1 whenever the filter changes
   useEffect(() => {
-    loadProjects(filterDepartmentId)
+    setPage(1)
   }, [filterDepartmentId])
 
-  const loadProjects = async (selectedDepartmentId = filterDepartmentId) => {
+  useEffect(() => {
+    loadProjects(filterDepartmentId, page, pageSize)
+  }, [filterDepartmentId, page, pageSize])
+
+  const loadProjects = async (
+    selectedDepartmentId = filterDepartmentId,
+    currentPage = page,
+    currentPageSize = pageSize
+  ) => {
     const requestId = projectsRequestIdRef.current + 1
     projectsRequestIdRef.current = requestId
     setIsLoading(true)
     try {
-      const params = selectedDepartmentId ? { departmentId: selectedDepartmentId } : {}
+      const params: { departmentId?: string; page: number; pageSize: number } = {
+        page: currentPage,
+        pageSize: currentPageSize,
+      }
+      if (selectedDepartmentId) params.departmentId = selectedDepartmentId
       const response = await projectApi.list(params)
       if (projectsRequestIdRef.current !== requestId) return
       setProjects(response.data.projects)
+      setTotalCount(response.data.totalCount ?? response.data.projects.length)
+      setTotalPages(response.data.totalPages ?? 1)
     } catch (err) {
       if (projectsRequestIdRef.current !== requestId) return
       console.error('Failed to load projects:', err)
@@ -197,7 +220,7 @@ export default function ProjectsPage() {
       {/* Project List Cards - show department if admin */}
       {!isLoading && projects.length > 0 && user?.role === 'admin' && (
         <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
-          共 {projects.length} 個項目
+          共 {totalCount} 個項目
           {filterDepartmentId && ` · 已篩選部門：${departments.find(d => d.id === filterDepartmentId)?.name || '未知'}`}
         </div>
       )}
@@ -213,19 +236,19 @@ export default function ProjectsPage() {
       {!isLoading && projects.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map((project) => (
-            <div
+            // 整張 card 都係 link,唔淨只 project name — RG-2026-06-09 bug #8
+            // (原 link 只包住 <h3>,要點 card 其他位無反應)
+            <Link
               key={project.id}
-              className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg transition-shadow group"
+              to={`/projects/${project.id}`}
+              className="block bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg hover:border-primary-300 transition-shadow group"
             >
               <div className="flex items-start justify-between mb-3">
-                <Link
-                  to={`/projects/${project.id}`}
-                  className="flex-1 min-w-0"
-                >
+                <div className="flex-1 min-w-0">
                   <h3 className="text-lg font-semibold text-gray-900 group-hover:text-primary-600 transition-colors truncate">
                     {project.name}
                   </h3>
-                </Link>
+                </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusBadge(project.status)}`}>
                     {getStatusLabel(project.status)}
@@ -233,15 +256,15 @@ export default function ProjectsPage() {
                   {canEditOrDelete(project) && (
                     <>
                       <button
-                        onClick={() => openEditModal(project)}
-                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); openEditModal(project) }}
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors relative z-10"
                         title="編輯項目"
                       >
                         <Edit2 size={16} />
                       </button>
                       <button
-                        onClick={() => handleDelete(project.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(project.id) }}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors relative z-10"
                         title="刪除項目"
                       >
                         <Trash2 size={16} />
@@ -264,9 +287,24 @@ export default function ProjectsPage() {
                 <span>{project.memberCount || 0} 個成員</span>
                 <span>{project.requirementCount || 0} 個需求</span>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
+      )}
+
+      {/* Pagination (US-7.x) */}
+      {!isLoading && totalCount > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => {
+            setPageSize(s)
+            setPage(1)
+          }}
+        />
       )}
 
       {/* Create Modal Form */}

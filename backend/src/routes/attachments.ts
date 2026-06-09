@@ -25,9 +25,9 @@ const attachmentRoutes = new Elysia({ prefix: '/attachments' })
         return { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }
       }
 
-      if (!['requirement', 'task', 'project', 'wiki'].includes(entityType)) {
+      if (!['requirement', 'task', 'project', 'wiki', 'bug'].includes(entityType)) {
         set.status = 400
-        return { error: { code: 'VALIDATION_ERROR', message: 'entityType must be "requirement", "task", "project", or "wiki"' } }
+        return { error: { code: 'VALIDATION_ERROR', message: 'entityType must be "requirement", "task", "project", "wiki", or "bug"' } }
       }
 
       // For project and wiki attachments, entityId is the projectId/wikiId
@@ -110,7 +110,7 @@ const attachmentRoutes = new Elysia({ prefix: '/attachments' })
     }
   )
   // Download attachment
-  .get('/:id', async ({ params, set }) => {
+  .get('/:id', async ({ params, set, request }) => {
     const attachment = await prisma.attachment.findUnique({
       where: { id: params.id }
     })
@@ -126,11 +126,27 @@ const attachmentRoutes = new Elysia({ prefix: '/attachments' })
       return { error: { code: 'NOT_FOUND', message: 'File not found' } }
     }
 
+    // For image MIME types, allow inline preview when requested
+    // (?inline=1), otherwise force download. Other types always download.
+    const url = new URL(request.url)
+    const isInline = url.searchParams.get('inline') === '1'
+    const isImage = attachment.mimeType.startsWith('image/')
+    const dispositionType = (isImage && isInline) ? 'inline' : 'attachment'
+
+    // RFC 5987 / RFC 6266: encode non-ASCII filenames so browsers
+    // (especially Chromium-based) can use the original name. Falls back to
+    // a sanitized ASCII filename for legacy clients.
+    const asciiFallback = attachment.filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '')
+    const utf8Encoded = encodeURIComponent(attachment.filename).replace(/['()]/g, escape).replace(/\*/g, '%2A')
+    const contentDisposition = `${dispositionType}; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`
+
     const file = fs.readFileSync(filePath)
     return new Response(file, {
       headers: {
         'Content-Type': attachment.mimeType,
-        'Content-Disposition': `attachment; filename="${attachment.filename}"`
+        'Content-Disposition': contentDisposition,
+        // Allow the browser to cache images briefly so re-renders are fast
+        'Cache-Control': 'private, max-age=300',
       }
     })
   })

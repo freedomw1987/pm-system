@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { hasPermission } from '../middleware/permission'
+import { computePagination } from '../utils/pagination'
 
 const getUserDepartmentId = async (user: any) => {
   if (!user?.id) return null
@@ -44,6 +45,10 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
       where.departmentId = departmentId
     }
 
+    const totalCount = await prisma.project.count({ where })
+
+    const pagination = computePagination(query as { page?: string; pageSize?: string; limit?: string }, totalCount)
+
     const projects = await prisma.project.findMany({
       where,
       include: {
@@ -56,7 +61,9 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
           include: { user: { select: { id: true, name: true, email: true } } }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      ...(pagination.skip ? { skip: pagination.skip } : {}),
+      ...(pagination.take !== undefined ? { take: pagination.take } : {})
     })
 
     return {
@@ -69,7 +76,11 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
         memberCount: p._count.members,
         requirementCount: p._count.requirements,
         createdAt: p.createdAt
-      }))
+      })),
+      totalCount,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalPages: pagination.totalPages
     }
   })
   // Create project (PM or Admin with projects.create)
@@ -143,20 +154,26 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
     return { project }
   })
   // Get requirements for a project (nested under projects)
-  .get('/:id/requirements', async ({ params, user }) => {
+  // US-7.x: paginated (Sprint 9)
+  .get('/:id/requirements', async ({ params, query, set, user }) => {
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       include: { members: true }
     })
 
     if (!project) {
-      return { requirements: [] }
+      set.status = 404
+      return { error: { code: 'NOT_FOUND', message: 'Project not found' } }
     }
 
     // Check permission: admin, project member, or same department
     if (!(await canAccessProject(project, user))) {
-      return { requirements: [] }
+      set.status = 403
+      return { error: { code: 'FORBIDDEN', message: 'Access denied' } }
     }
+
+    const totalCount = await prisma.requirement.count({ where: { projectId: params.id } })
+    const pagination = computePagination(query as { page?: string; pageSize?: string; limit?: string }, totalCount)
 
     const requirements = await prisma.requirement.findMany({
       where: { projectId: params.id },
@@ -164,10 +181,18 @@ const projectRoutes = new Elysia({ prefix: '/projects' })
         createdBy: { select: { id: true, name: true } },
         _count: { select: { tasks: true } }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      ...(pagination.skip ? { skip: pagination.skip } : {}),
+      ...(pagination.take !== undefined ? { take: pagination.take } : {})
     })
 
-    return { requirements }
+    return {
+      requirements,
+      totalCount,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalPages: pagination.totalPages
+    }
   })
   // Create requirement under a project (nested under projects)
   .post('/:id/requirements', async ({ params, body, set, user }) => {

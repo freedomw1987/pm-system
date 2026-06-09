@@ -4,6 +4,8 @@ import { userApi, roleApi, departmentApi } from '../utils/api'
 import type { User, Role, Department } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { hasAnyPermission } from '../utils/permissions'
+import Pagination from '../components/Pagination'
+import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 interface BatchResult {
   email: string
@@ -29,17 +31,32 @@ export default function UsersPage() {
   const [batchPreview, setBatchPreview] = useState<{ name: string; email: string; role: string; password: string; department: string }[]>([])
   const [filterDepartment, setFilterDepartment] = useState('')
 
-  useEffect(() => { loadUsers() }, [filterDepartment])
+  // Pagination (US-7.x Sprint 9)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+
+  // Reset to page 1 whenever the department filter changes
+  useEffect(() => {
+    setPage(1)
+  }, [filterDepartment])
+
+  useEffect(() => { loadUsers() }, [filterDepartment, page, pageSize])
 
   const loadUsers = async () => {
     setIsLoading(true)
     try {
+      const params: { departmentId?: string; page: number; pageSize: number } = { page, pageSize }
+      if (filterDepartment) params.departmentId = filterDepartment
       const [usersRes, rolesRes, deptsRes] = await Promise.all([
-        userApi.list(filterDepartment ? { departmentId: filterDepartment } : undefined),
+        userApi.list(params),
         roleApi.list(),
         departmentApi.list(),
       ])
-      setUsers(usersRes.data.users)
+      setUsers(usersRes.data.users || [])
+      setTotalCount(usersRes.data.totalCount ?? usersRes.data.users?.length ?? 0)
+      setTotalPages(usersRes.data.totalPages ?? 1)
       setAvailableRoles(rolesRes.data.roles)
       setDepartments(deptsRes.data.departments)
     } catch (err) {
@@ -201,7 +218,7 @@ export default function UsersPage() {
         <div className="flex items-center gap-3">
           <select
             value={filterDepartment}
-            onChange={(e) => { setFilterDepartment(e.target.value); loadUsers() }}
+            onChange={(e) => setFilterDepartment(e.target.value)}
             className="input-field w-40"
           >
             <option value="">全部部門</option>
@@ -284,6 +301,14 @@ export default function UsersPage() {
               )}
             </div>
           ))}
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
+          />
         </div>
       )}
 

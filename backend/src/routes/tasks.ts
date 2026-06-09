@@ -4,6 +4,7 @@ import { hasPermission } from '../middleware/permission'
 import { findBestAgent, getAgentsSkillOverview } from '../agent/skill-matcher'
 import { broadcastToAgents, getConnectedAgents } from '../agent/runtime'
 import { executeTask } from '../agent/task-executor'
+import { computePagination } from '../utils/pagination'
 
 const userSelect = { id: true, name: true, email: true, isAgent: true }
 
@@ -87,13 +88,24 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
   .get('/', async ({ query, user }) => {
     const where = buildTaskListWhere(query, user)
 
+    const totalCount = await prisma.task.count({ where })
+    const pagination = computePagination(query as { page?: string; pageSize?: string; limit?: string }, totalCount)
+
     const tasks = await prisma.task.findMany({
       where,
       include: taskInclude,
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      ...(pagination.skip ? { skip: pagination.skip } : {}),
+      ...(pagination.take !== undefined ? { take: pagination.take } : {})
     })
 
-    return { tasks }
+    return {
+      tasks,
+      totalCount,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalPages: pagination.totalPages
+    }
   })
   // Create task (Tech Lead or Admin with tasks.create)
   .post('/', async ({ body, set, user }) => {

@@ -6,6 +6,8 @@ import { hasAnyPermission } from '../utils/permissions'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
 import ToggleMultiSelect from '../components/ToggleMultiSelect'
+import Pagination from '../components/Pagination'
+import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 import type { Requirement, Task, Bug, User } from '../types'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -19,6 +21,17 @@ export default function RequirementDetailPage() {
   const [projectMembers, setProjectMembers] = useState<User[]>([])
   const [activeTab, setActiveTab] = useState<'tasks' | 'bugs'>('tasks')
   const [isLoading, setIsLoading] = useState(true)
+
+  // ── Pagination (US-7.x Sprint 9) ─ sub-lists ──────────────────
+  const [pageTask, setPageTask] = useState(1)
+  const [pageSizeTask, setPageSizeTask] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCountTask, setTotalCountTask] = useState(0)
+  const [totalPagesTask, setTotalPagesTask] = useState(1)
+
+  const [pageBug, setPageBug] = useState(1)
+  const [pageSizeBug, setPageSizeBug] = useState(DEFAULT_PAGE_SIZE)
+  const [totalCountBug, setTotalCountBug] = useState(0)
+  const [totalPagesBug, setTotalPagesBug] = useState(1)
 
   // ── Requirement edit ──────────────────────────────────────────
   const [showEditReq, setShowEditReq] = useState(false)
@@ -78,7 +91,7 @@ export default function RequirementDetailPage() {
   })
   const [isSubmittingWorkLog, setIsSubmittingWorkLog] = useState(false)
 
-  useEffect(() => { if (id) loadData() }, [id])
+  useEffect(() => { if (id) loadData() }, [id, pageTask, pageSizeTask, pageBug, pageSizeBug])
 
   const loadProjectMembers = async (projectId?: string) => {
     const targetProjectId = projectId || requirement?.projectId
@@ -101,15 +114,20 @@ export default function RequirementDetailPage() {
 
   const loadData = async () => {
     try {
+      // Sprint 9: paginated sub-lists (US-7.x)
       const [reqRes, tasksRes, bugsRes] = await Promise.all([
         requirementApi.get(id!),
-        taskApi.list({ requirementId: id }),
-        bugApi.list({ requirementId: id })
+        taskApi.list({ requirementId: id, page: pageTask, pageSize: pageSizeTask }),
+        bugApi.list({ requirementId: id, page: pageBug, pageSize: pageSizeBug })
       ])
       const req = reqRes.data.requirement
       setRequirement(req)
-      setTasks(tasksRes.data.tasks)
-      setBugs(bugsRes.data.bugs)
+      setTasks(tasksRes.data.tasks || [])
+      setTotalCountTask(tasksRes.data.totalCount ?? tasksRes.data.tasks?.length ?? 0)
+      setTotalPagesTask(tasksRes.data.totalPages ?? 1)
+      setBugs(bugsRes.data.bugs || [])
+      setTotalCountBug(bugsRes.data.totalCount ?? bugsRes.data.bugs?.length ?? 0)
+      setTotalPagesBug(bugsRes.data.totalPages ?? 1)
       await loadProjectMembers(req?.projectId)
     } catch (err) {
       console.error(err)
@@ -687,6 +705,14 @@ export default function RequirementDetailPage() {
                   </div>
                 </div>
               ))}
+              <Pagination
+                page={pageTask}
+                pageSize={pageSizeTask}
+                totalCount={totalCountTask}
+                totalPages={totalPagesTask}
+                onPageChange={setPageTask}
+                onPageSizeChange={(s) => { setPageSizeTask(s); setPageTask(1) }}
+              />
             </div>
           )}
         </div>
@@ -759,6 +785,14 @@ export default function RequirementDetailPage() {
                   </div>
                 </div>
               ))}
+              <Pagination
+                page={pageBug}
+                pageSize={pageSizeBug}
+                totalCount={totalCountBug}
+                totalPages={totalPagesBug}
+                onPageChange={setPageBug}
+                onPageSizeChange={(s) => { setPageSizeBug(s); setPageBug(1) }}
+              />
             </div>
           )}
         </div>
