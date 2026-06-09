@@ -1,6 +1,10 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 16 closure,David UX 反饋「Dashboard 只 show 統計 + 項目清單」全綠(拎走 Recent Projects)
+> **Status**: 🟢 2026-06-10 — Sprint 17 closure,AddTaskModal Kanban + Task Tab 統一 + E2E regression guard,Sprint 15/16 確認 PASS
+> **Update**: 2026-06-10 Sprint 17 — AddTaskModal unification + E2E regression guard:
+>   - **Frontend** `AddTaskModal.tsx` 新 component(216 行 single source of truth),`ProjectKanban` + `ProjectDetailPage > Task Tab` 兩個入口共用,Kanban 原 76-line inline modal 拎走(原本缺 RichText / 智能分配 / 參與人 / 父任務 4 個 feature,UI drift 嘅 textbook)
+>   - **E2E:63/63 → 66/66 + 8 skipped**(+3 新 spec `add-task-modal-unified.spec.ts` 8.1s pass,守住「兩個入口 modal field set set-diff = ∅」嘅 cross-entry invariant),Backend unit 606 pass(無 backend 改)
+>   - **Sprint 15/16 closure 確認**:Sprint 15 scope=my(5 個 backend unit + 2 個 E2E)+ Sprint 16 minimal layout(0 backend 改,Visual verify script)已 ship,本 sprint 同步收口 retro `2026-06-10-sprint-17-modal-unify-and-closure.md`
 > **Update**: 2026-06-10 Sprint 16 — Dashboard minimal layout closure:
 >   - **Frontend** Dashboard 拎走「最近訪問」Quick Switch section(David 講「只 show 統計 + 項目清單」,navigation affordance 唔屬於呢類)
 >   - 保留 4 個 widget 統計(進行中任務 / 未解決缺陷 / 本週時數 / 我參與嘅項目)+ 我參與嘅項目 grid (scope=my 嚴格,pageSize 12)
@@ -100,7 +104,7 @@
 
 ## 2. 健康指標
 
-| 指標 | 數值 (2026-06-10 Sprint 10 結算 — P0 remaining US test push) |
+| 指標 | 數值 (2026-06-10 Sprint 17 結算 — AddTaskModal unify + E2E regression guard) |
 |------|------|
 | US 總數 | 50+ |
 | P0 US 過 test | **29/29 (100%)** 🟢 (Sprint 3: 26/29 = 90%) |
@@ -110,8 +114,8 @@
 | P0 US DEFERRED | **0** 🟢 |
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
-| Unit tests 總數 | **606 pass** (Sprint 15: 601 → 606,+5 — Sprint 15 scope=my 嚴格過濾 invariant test:non-admin 有部門 / non-admin 冇部門 / admin / default 向後兼容 / scope=my+departmentId AND) |
-| E2E tests | **63 pass + 8 skipped** (Sprint 15: 61 → 63,+2 — Dashboard widget 4 count 與 /api/projects?scope=my totalCount 一致 + 我參與嘅項目 section 唔見同部門但冇 member 嘅項目) |
+| Unit tests 總數 | **606 pass** (Sprint 17: 無變,frontend-only refactor;Sprint 15 baseline) |
+| E2E tests | **66 pass + 8 skipped** (Sprint 17: 63 → 66,+3 — `add-task-modal-unified.spec.ts` 守住 Kanban + Task Tab modal field set 一致 invariant,set-diff = ∅) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
 
@@ -194,6 +198,34 @@
   - `<EntityAutocomplete>` generic化(Pick<id, name, type> 適用 user / task / bug)
   - Dashboard widget 加 chart(本週時數 sparkline + 按部門)
   - Mobile RWD 全 project audit(目前只 audit 4 個 page,Layout + 其他 page 未 audit)
+
+### Sprint 17 (2026-06-10) 收工摘要 — AddTaskModal unification + E2E regression guard
+
+- **目標**:Sprint 16 之後 David 講「AddTaskModal 兩個入口要 unify + 加 E2E 防 drift」+ Sprint 15/16 retros / tracker 收口
+- **修法**:
+  - **Frontend `AddTaskModal.tsx`** 新 component(216 行 single source of truth)— title / description (RichText) / 智能分配 toggle + recommended agent / assignee / participants / parent task / cancel / submit 共 8 個 field/control
+  - **`ProjectKanban.tsx` refactor** — 拎走 inline 76-line modal(原本缺 RichText / 智能分配 / 參與人 / 父任務 4 個 feature),wire 共用 `<AddTaskModal>`;auto-assign `useEffect` 補返(toggle 原本 inert);`onClose` reset 7 個 state(`newTaskParticipantIds` / `newTaskParentId` / `recommendedAgent` 等原本 leak across opens)
+  - **`ProjectDetailPage.tsx` fix** — `assigneeOptions` type 由 `JSX.Element[]` 改返 `MemberOption[]`,3 個 local-helper modal(AddBug/EditTask/EditBug)各自 `.map()` 自己 `<option>`(原本依賴 legacy inline JSX)
+  - **`handleAddTask` signature fix** — Kanban 嗰邊原本 `(e: FormEvent)` 但 call site 傳 `() => handleAddTask()` 0 args,改 `onSubmit={handleAddTask}` 直接 forward event
+- **新 E2E spec**:`e2e/tests/add-task-modal-unified.spec.ts`(252 行,3 test)
+  - T1:Task Tab「新建任務」按鈕開出 modal → 11 個 visibility snapshot key 全 true
+  - T2:Kanban Tab 每個 column 嘅「新增任務」按鈕開出同樣 modal → 11 個 snapshot 全 true
+  - T3:**Cross-entry set diff** — collect 兩邊 snapshot,assert `Object.keys()` set-diff = ∅ + 每個 key 嘅 visibility 都一致 + 兩邊都 100% true
+- **Verification**:
+  - `npx playwright test add-task-modal-unified.spec.ts` → **3/3 pass 8.1s**(stack 已起,frontend bundle 含 commit f6f3674)
+  - Backend 0 改 → 唔需要 rebuild backend container,unit test 606 baseline 不變
+  - `docker exec pm-system-frontend-1` confirmed:production bundle 含 `'智能分配'` 字串恰好一次,證明 single AddTaskModal code path 已 ship
+- **意外發現 / 教訓**:
+  - **Inline modal = UI drift 的 default 路徑**:Sprint 7 之後 ProjectDetailPage 加咗 smart-assign / participants / parent task,Kanban 全部漏 sync。共用 component 應該係 default,inline 應該係 exception
+  - **`assigneeOptions` 由 JSX → data**:共用 component 強制 callers normalise data(冇咗 build JSX 入 state 嘅 anti-pattern),refactor 嗰時 type signature 即時暴露
+  - **E2E set-diff vs happy-path assert**:逐 field assert 兩邊各寫一次,將來改 field 容易兩邊 stale;set-diff 直接守 cross-entity invariant
+  - **Backend `/health` 404 ≠ unhealthy**:docker healthcheck unhealthy 但 `/auth/login` 200 → application-level smoke 至係真標準,healthcheck endpoint 缺 → 入 TECH-DEBT
+- **紅線狀態**:紅線 11(tracker 同步)✅、紅線 12(規模性 modal refactor 必有 E2E)✅、紅線 13(無 user-reported bug fix)N/A(預防性 + regression guard)
+- **Out of scope(留俾下個 sprint)**:
+  - Backend `GET /health` endpoint(healthcheck 配置 cleanup)
+  - `CreateBugModal.tsx` 對齊新 `<AddBugModal>` pattern(3 個 divergent bug-creation surface,Sprint 11 已 DEFERRED)
+  - `EditTaskModal` 共用 `<AddTaskModal>` props pattern(只係 `submitLabel` + `onSubmit` 唔同,可省 ~100 行 inline)
+  - `useTaskFormState` custom hook(等到 3rd caller 出現先抽)
 
 ### Sprint 16 (2026-06-10) 收工摘要 — Dashboard minimal layout
 
@@ -389,6 +421,7 @@
 | 2026-06-09 | **Sprint 7 closure — ProjectDetailPage alignment**:ProjectDetailPage 嘅 Tasks/Bugs tabs 全 feature parity with RequirementDetailPage(加咗 新增任務 button、inline status select、Clock work-log、Bot AI 自動分配、WorkLogModal、智能分配 panel);所有 modal `max-w-2xl` + `RichTextEditor`;bug status `closed` 移除;tasks 加 `testing` option;Requirement 新增/編輯 modal 都改 `max-w-2xl` 對齊;helpers 對齊 Req 嘅 `bg-gray-100`/`高`/`嚴重`;TypeScript clean,33/33 E2E pass,499/499 unit pass,frontend-only refactor 冇 backend regression;Plan: `/Users/davidchu/.claude/plans/cozy-wandering-quiche.md` |
 | 2026-06-09 | **Sprint 8 closure — Server-side Pagination**:4 個 list endpoint(projects/requirements/tasks/bugs)+ 5 個 list page 全部接 server-side pagination;新 `computePagination` 共用 helper(default 20 / max 100)鏡 worklogs `limit=-1` 模式;response 向後兼容(keep 原 array 名 + add `totalCount`/`page`/`pageSize`/`totalPages`);新 `<Pagination>` controlled component;status/project filter 改 server-side;pagination helper 17 個 unit test + 9 個 E2E;Unit 499→516(+17),E2E 33→42(+9 pagination E2E),Frontend `tsc` clean,Frontend `vite build` clean |
 | 2026-06-09 | **Sprint 9 closure — Sub-list pagination + Reports stats consistency**:sub-list 全部接 server-side pagination(`ProjectDetailPage` 3 tabs + `RequirementDetailPage` 2 sub-lists + `UsersPage`);`/api/reports/cost` + `/api/reports/progress` 修 bug — 用 `where.OR` pattern 同 worklogs 對齊,統計一致化;33 個新 unit test(pagination response shape + RBAC gates + 成本 where 修 + 進度 status enum + percent math),10 個新 E2E(7 sub-list UI + 1 user UI + 2 reports cost leak);Unit 516→549(+33),E2E 42→52(+10),Frontend `tsc` clean;US-11.1 升 PASS-UNIT,US-11.2 升 PASS-UNIT+PASS-E2E(雙綠) |
+| 2026-06-10 | **Sprint 17 closure — AddTaskModal unification + E2E regression guard**:新 `AddTaskModal.tsx` 共用 component(216 行,8 個 field/control single source of truth)取代 ProjectKanban 嘅 inline 76-line modal(原缺 RichText / 智能分配 / 參與人 / 父任務);new spec `e2e/tests/add-task-modal-unified.spec.ts` 3 test 8.1s pass — T1 + T2 分別 cover Task Tab / Kanban 入口 11 個 visibility snapshot key,T3 set-diff 守住「兩入口 modal field set = ∅」cross-entry invariant;E2E 63→66(+3),Unit 606 baseline 不變(frontend-only);Sprint 15/16 retro 同步收口 `docs/retros/2026-06-10-sprint-17-modal-unify-and-closure.md`;紅線 11/12 ✅,紅線 13 N/A |
 
 ---
 
