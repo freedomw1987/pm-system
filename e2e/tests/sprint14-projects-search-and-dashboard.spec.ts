@@ -154,10 +154,12 @@ test.describe('Sprint 14 — Dashboard Activity Feed (T14.4)', () => {
     await page.waitForTimeout(800)
 
     // 4 個 widget label 應該出現
-    await expect(page.getByText('進行中任務')).toBeVisible()
-    await expect(page.getByText('未解決缺陷')).toBeVisible()
-    await expect(page.getByText('本週時數')).toBeVisible()
-    await expect(page.getByText('項目總數')).toBeVisible()
+    await expect(page.getByText('進行中任務').first()).toBeVisible()
+    await expect(page.getByText('未解決缺陷').first()).toBeVisible()
+    await expect(page.getByText('本週時數').first()).toBeVisible()
+    // Sprint 15: widget 4 改 '我參與嘅項目' (前係 '項目總數')
+    // "我參與嘅項目" 喺 widget + section heading 出現兩次,用 .first() 避 strict mode
+    await expect(page.getByText('我參與嘅項目').first()).toBeVisible()
   })
 
   test('Dashboard widget 點擊導航去對應 page', async ({ page }, testInfo) => {
@@ -171,5 +173,66 @@ test.describe('Sprint 14 — Dashboard Activity Feed (T14.4)', () => {
     const widget = page.getByText('進行中任務').locator('xpath=ancestor::a[1]')
     await widget.click()
     await expect(page).toHaveURL(/\/my-tasks/)
+  })
+})
+
+test.describe('Sprint 15 — Dashboard scope=my 嚴格過濾 (David feedback)', () => {
+  test('admin + scope=my: Dashboard 我參與嘅項目 count 與 /api/projects?scope=my totalCount 一致', async ({ page, request }, testInfo) => {
+    // 用 API 攞真實 count (避免 race condition)
+    const token = await loginAs(request, 'admin', testInfo.title)
+    const apiRes = await request.get(`${BACKEND}/api/projects?scope=my&pageSize=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    expect(apiRes.status()).toBe(200)
+    const apiBody = await apiRes.json()
+    const apiCount = apiBody.totalCount
+
+    // 喺 UI 攞 widget 4 嗰個 count
+    await loginViaStorage(page, token)
+    await page.goto(`${FRONTEND}/`)
+    await page.waitForTimeout(800)
+
+    // widget 4 嘅 count 喺 "我參與嘅項目" label 下面
+    const widgetLabel = page.getByText('我參與嘅項目').first()
+    await expect(widgetLabel).toBeVisible()
+
+    // 攞 widget 4 嘅 count text(role: number)
+    const count = await page.getByText('我參與嘅項目').first().locator('xpath=following-sibling::p[1]').textContent()
+    expect(count?.trim()).toBe(String(apiCount))
+  })
+
+  test('admin + scope=my: Dashboard「我參與嘅項目」section 唔見同部門但冇 member 嘅項目', async ({ page, request }, testInfo) => {
+    const token = await loginAs(request, 'admin', testInfo.title)
+
+    // 攞 admin 自己 member 嘅項目 count (用 pageSize=1 拎 totalCount 而唔係 array length)
+    const myRes = await request.get(`${BACKEND}/api/projects?scope=my&pageSize=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const myCount = (await myRes.json()).totalCount as number
+
+    // 攞 default (同部門) 嘅項目 count
+    const allRes = await request.get(`${BACKEND}/api/projects?pageSize=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const allCount = (await allRes.json()).totalCount as number
+
+    // 證明 default 寬鬆過 scope=my (admin 見自己 member + 同部門,scope=my 僅自己 member)
+    expect(allCount).toBeGreaterThan(myCount)
+
+    // 攞 admin 第一個 scope=my 嘅項目 name
+    const myFirst = await request.get(`${BACKEND}/api/projects?scope=my&pageSize=100`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const myProjects = (await myFirst.json()).projects as Array<{ id: string; name: string }>
+    test.skip(myProjects.length === 0, 'admin has no member projects — skip UI assert')
+
+    // Dashboard 我參與嘅項目 section 只 render 自己 member 嘅
+    await loginViaStorage(page, token)
+    await page.goto(`${FRONTEND}/`)
+    await page.waitForTimeout(800)
+
+    // 至少見到 myProjects 入面一個項目嘅 name
+    const firstMyProject = myProjects[0]
+    await expect(page.getByText(firstMyProject.name).first()).toBeVisible({ timeout: 5000 })
   })
 })

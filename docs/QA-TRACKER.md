@@ -1,7 +1,10 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 14 closure,4 個 David feedback 全綠
-> **Update**: 2026-06-10 Sprint 14 — David UX 反饋 4 個項目全部 ship:
+> **Status**: 🟢 2026-06-10 — Sprint 15 closure,David UX 反饋「Dashboard 只 show 自己有份嘅項目」全綠
+> **Update**: 2026-06-10 Sprint 15 — Dashboard scope=my 嚴格過濾 closure:
+>   - **Backend** `GET /api/projects` 加 `?scope=my` 嚴格只 filter 自己 member 嘅(包括 admin),default 仍然係「member OR 同部門」寬鬆
+>   - **Frontend** `Dashboard` 改用 `scope=my` 攞自己參與嘅項目,widget 4 由「項目總數」改「我參與嘅項目」,empty state 改「暫無我參與嘅項目」
+>   - **E2E:61 → 63 pass**(+2 新 spec),Backend unit:601 → 606 pass(+5 new scope=my invariant test)
 >   - **`/projects` 頁面 search box**(client-side useMemo filter,跟 `list-search-box` skill default pattern)
 >   - **`/projects` 頁面 mobile RWD**(`flex-col sm:flex-row` header 改 layout + 4 個 page iPhone 14 viewport audit 0 overflow)
 >   - **WorkLogs + Reports 嘅 project dropdown 改 Autocomplete**(`<ProjectAutocomplete>` 自建 reusable component,type-ahead + keyboard nav + 顯示 status badge)
@@ -102,8 +105,8 @@
 | P0 US DEFERRED | **0** 🟢 |
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
-| Unit tests 總數 | **601 pass** (Sprint 13: 592 → 601,+9 — RG-015 boundary case for `canEditTaskFields` developer RBAC,9 個 test 加喺 `tasks.test.ts` Sprint 10 已加但 tracker baseline 冇更新) |
-| E2E tests | **61 pass + 8 skipped** (Sprint 14: 55 → 61,+6 — `sprint14-projects-search-and-dashboard.spec.ts` T14.1 2 個 + T14.3 2 個 + T14.4 2 個) |
+| Unit tests 總數 | **606 pass** (Sprint 15: 601 → 606,+5 — Sprint 15 scope=my 嚴格過濾 invariant test:non-admin 有部門 / non-admin 冇部門 / admin / default 向後兼容 / scope=my+departmentId AND) |
+| E2E tests | **63 pass + 8 skipped** (Sprint 15: 61 → 63,+2 — Dashboard widget 4 count 與 /api/projects?scope=my totalCount 一致 + 我參與嘅項目 section 唔見同部門但冇 member 嘅項目) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
 
@@ -186,6 +189,24 @@
   - `<EntityAutocomplete>` generic化(Pick<id, name, type> 適用 user / task / bug)
   - Dashboard widget 加 chart(本週時數 sparkline + 按部門)
   - Mobile RWD 全 project audit(目前只 audit 4 個 page,Layout + 其他 page 未 audit)
+
+### Sprint 15 (2026-06-10) 收工摘要 — Dashboard scope=my 嚴格過濾
+
+- **目標**:David feedback「Dashboard 不要 show 所有項目,只要 show 自己有參與的項目」
+- **修法**:
+  - **Backend** `GET /api/projects` 加 `?scope=my` 嚴格只 filter 自己 member 嘅(包括 admin 都要守 invariant),`scope` 唔帶 default 仍然係「member OR 同部門」寬鬆(向後兼容)
+  - **Frontend** `Dashboard` 攞項目改用 `scope=my`,widget 4 由「項目總數」改「我參與嘅項目」,empty state 改「暫無我參與嘅項目」+ 引導用戶「聯絡 PM 邀請您加入」
+  - **Tracker / Red line 11** 合規:同步更新 Sprint 15 row
+- **意外發現 / 教訓**:
+  - **Backend source rebuild 必要性**:Backend docker container 唔會 hot-reload TS source,改咗 `/app/src/routes/projects.ts` 之後要 `docker compose build backend` + `docker compose up -d --force-recreate --no-deps backend` 拎新 image,先見效
+  - **Frontend type signature**:Backend 加咗 query param 之後,frontend `api.ts` 嘅 `projectApi.list` type 都係要更新,唔 update `bun run build` 會 fail(TS strict)
+  - **Strict mode `getByText`**:`Dashboard widget 4 label "我參與嘅項目"` 喺 widget 嗰度 + section heading 出現兩次(因為我哋 Sprint 14 嗰個 helper 寫 widget 4 改名叫「我參與嘅項目」,section heading 改用同一個 text)。Test 一定要 `.first()` 或者用 `getByRole` 鎖定 widget 嘅 specific element
+  - **Insight 揭發**:Admin 之前能見 198 個 E2E fixture project(全部同部門),改咗之後真係 191 個自己 member — admin 真係好多項目 member 但唔係全部。嚴格過濾有意義
+- **紅線狀態**:紅線 11(tracker 同步)✅、紅線 12(P0 US 必有 E2E)✅、紅線 13(無 user-reported bug fix)N/A(純 UX 改進)
+- **Out of scope(留俾下個 sprint)**:
+  - Backend `scope=team`(將來團隊 filter,例如「我嘅部門 + 我管理嘅部門」)
+  - Dashboard 改用 generic `<EntityAutocomplete>` 同 widget layout 抽 `useDashboardData` custom hook
+  - `ProjectsPage` 入面都加 `scope=my` toggle filter UI(後端已經 work)
 
 🟢🟢 **8 個 P0 US 雙綠**(Sprint 8: 7 個) — Sprint 9 +US-11.2(工時 / 成本報告)由 NONE → 雙綠。
 🟢 **22 個 P0 US PASS-UNIT** — Sprint 9 +US-11.1(進度報告)由 NONE → PASS-UNIT。

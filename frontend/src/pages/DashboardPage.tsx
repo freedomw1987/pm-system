@@ -62,8 +62,9 @@ export default function DashboardPage() {
     setIsLoading(true)
     try {
       const [projRes, tasksRes, bugsRes, workLogsRes] = await Promise.all([
-        // Dashboard 唔需要 limit: -1 — pageSize: 12 已經夠晒,196 個項目 render 喺 dashboard 係 UX disaster
-        projectApi.list({ page: 1, pageSize: 12 }),
+        // Sprint 15: scope=my 嚴格只見自己 member 嘅(David 2026-06-10 feedback)
+        // Default backend 寬鬆(member OR 同部門)改為嚴格(member only)— 包括 admin
+        projectApi.list({ scope: 'my', page: 1, pageSize: 12 }),
         user?.id
           ? taskApi.list({ assigneeId: user.id, status: 'in_progress', page: 1, pageSize: 5 })
           : Promise.resolve({ data: { tasks: [] } } as any),
@@ -228,7 +229,7 @@ export default function DashboardPage() {
               </div>
             </Link>
 
-            {/* Widget 4: 項目總覽 */}
+            {/* Widget 4: 我參與嘅項目 (Sprint 15: 改 '項目總數' → '我參與嘅項目' 因為 scope=my) */}
             <Link
               to="/projects"
               className="card p-4 lg:p-6 hover:shadow-lg transition-shadow group"
@@ -238,7 +239,7 @@ export default function DashboardPage() {
                   <FolderKanban className="text-primary-600" size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-500">項目總數</p>
+                  <p className="text-sm text-gray-500">我參與嘅項目</p>
                   <p className="text-2xl font-bold text-gray-900">{projectTotalCount}</p>
                 </div>
                 <ChevronRight className="text-gray-300 group-hover:text-primary-500 transition-colors" size={20} />
@@ -291,23 +292,26 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* === 所有項目 grid (Sprint 14: 顯示首 12 個 + 睇更多 link) === */}
+          {/* === 我參與嘅項目 grid (Sprint 15: scope=my 嚴格只 show 自己 member 嘅) === */}
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">所有項目</h2>
-            {projectTotalCount > projects.length && (
-              <Link
-                to="/projects"
-                className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
-              >
-                睇更多 ({projectTotalCount - projects.length}+) <ChevronRight size={14} />
-              </Link>
-            )}
+            <h2 className="text-lg font-semibold text-gray-900">我參與嘅項目</h2>
+            <Link
+              to="/projects"
+              className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
+            >
+              查看全部 <ChevronRight size={14} />
+            </Link>
           </div>
           {projects.length === 0 ? (
             <div className="card p-12 text-center">
               <FolderKanban size={48} className="mx-auto text-gray-300 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">暫無項目</h3>
-              <p className="text-gray-500 mb-6">建立您的第一個項目開始管理工作</p>
+              {/* Sprint 15: empty state 改 '暫無我參與嘅項目', 因為 scope=my */}
+              <h3 className="text-lg font-medium text-gray-900 mb-2">暫無我參與嘅項目</h3>
+              <p className="text-gray-500 mb-6">
+                {hasAnyPermission(user, ['projects.create'])
+                  ? '建立您的第一個項目,或聯絡 PM 邀請您加入'
+                  : '聯絡 PM 邀請您加入項目'}
+              </p>
               {hasAnyPermission(user, ['projects.create']) && (
                 <Link
                   to="/projects/new"

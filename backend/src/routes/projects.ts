@@ -23,21 +23,31 @@ const canAccessProject = async (project: { departmentId?: string | null; members
 
 const projectRoutes = new Elysia({ prefix: '/projects' })
   // Get all projects (filtered by permission)
+  //   - default: non-admin 見自己 member 嘅 OR 同部門嘅(寬鬆,work well for collaboration)
+  //   - scope=my: 嚴格只見自己 member 嘅(用喺 Dashboard「我的項目」section,David 2026-06-10 feedback)
   .get('/', async ({ query, user }) => {
-    const { departmentId } = query as { departmentId?: string }
+    const { departmentId, scope } = query as { departmentId?: string; scope?: string }
 
     if (!user) return { projects: [] }
 
     // Build where clause
     const where: any = {}
 
-    // Admin sees all projects (optionally filtered by department)
     if (user?.role !== 'admin') {
       const userDepartmentId = await getUserDepartmentId(user)
-      where.OR = [
-        { members: { some: { userId: user?.id } } },
-        ...(userDepartmentId ? [{ departmentId: userDepartmentId }] : [])
-      ]
+      if (scope === 'my') {
+        // 嚴格:只見自己 member 嘅(忽略同部門)
+        where.members = { some: { userId: user?.id } }
+      } else {
+        // 寬鬆 default:自己 member OR 同部門
+        where.OR = [
+          { members: { some: { userId: user?.id } } },
+          ...(userDepartmentId ? [{ departmentId: userDepartmentId }] : [])
+        ]
+      }
+    } else if (scope === 'my') {
+      // Admin + scope=my 都要守「自己 member」 invariant(避免 admin 見 196 個 E2E fixture 嘅 dashboard)
+      where.members = { some: { userId: user?.id } }
     }
 
     // Filter by department

@@ -107,7 +107,7 @@ export const departmentApi = {
 
 // Project API
 export const projectApi = {
-  list: (params?: { departmentId?: string; page?: number; pageSize?: number; limit?: number }) =>
+  list: (params?: { departmentId?: string; scope?: 'my' | 'default'; page?: number; pageSize?: number; limit?: number }) =>
     api.get('/projects', params ? { params } : undefined),
   create: (data: { name: string; description?: string; departmentId?: string }) =>
     api.post('/projects', data),

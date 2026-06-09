@@ -350,20 +350,31 @@ describe('US-7.x Sprint 9: GET /:id/requirements paginated response', () => {
  *  - null department = 「冇部門」嘅 legacy 項目,只 admin / member 見到
  */
 function buildProjectListWhereForUser(
-  query: { departmentId?: string },
+  query: { departmentId?: string; scope?: string },
   user: AuthUser | null,
   userDepartmentId: string | null
 ): Record<string, any> {
   const where: Record<string, any> = {}
 
   if (user?.role !== 'admin') {
-    const orFilters: any[] = [
-      { members: { some: { userId: user?.id } } }
-    ]
-    if (userDepartmentId) {
-      orFilters.push({ departmentId: userDepartmentId })
+    if (query.scope === 'my') {
+      // Sprint 15: 嚴格只見自己 member 嘅(忽略同部門)
+      // David feedback: Dashboard「所有項目」只 show 自己有份,唔 show 同部門
+      where.members = { some: { userId: user?.id } }
+    } else {
+      // Default: 自己 member OR 同部門(寬鬆,work well for collaboration)
+      const orFilters: any[] = [
+        { members: { some: { userId: user?.id } } }
+      ]
+      if (userDepartmentId) {
+        orFilters.push({ departmentId: userDepartmentId })
+      }
+      where.OR = orFilters
     }
-    where.OR = orFilters
+  } else if (query.scope === 'my') {
+    // Admin + scope=my: 都要守「自己 member」 invariant
+    // (避免 admin 見 196 個 E2E fixture projects 嘅 dashboard)
+    where.members = { some: { userId: user?.id } }
   }
 
   if (query.departmentId) {
@@ -446,6 +457,61 @@ describe('US-2.4 (Sprint 10): 部門 link project', () => {
       const where = buildProjectListWhereForUser({}, null, null)
       expect(where.OR).toBeDefined()
       expect(where.OR[0]).toEqual({ members: { some: { userId: undefined } } })
+    })
+
+    // ── Sprint 15: scope=my 嚴格只見自己 member 嘅(David 2026-06-10 feedback) ──
+    test('Sprint 15: scope=my, 非 admin 有部門 → 嚴格只見自己 member, 忽略同部門', () => {
+      const where = buildProjectListWhereForUser(
+        { scope: 'my' },
+        { id: 'u-1', role: 'developer' },
+        'd-1' // 開發者屬 d-1 部門,但 scope=my 要忽略
+      )
+      expect(where.members).toEqual({ some: { userId: 'u-1' } })
+      expect(where.OR).toBeUndefined() // 冇 OR scope(嚴格)
+      expect(where.departmentId).toBeUndefined() // 冇 dept filter
+    })
+
+    test('Sprint 15: scope=my, 非 admin 冇部門 → 仍然嚴格只見自己 member', () => {
+      const where = buildProjectListWhereForUser(
+        { scope: 'my' },
+        { id: 'u-1', role: 'developer' },
+        null
+      )
+      expect(where.members).toEqual({ some: { userId: 'u-1' } })
+      expect(where.OR).toBeUndefined()
+    })
+
+    test('Sprint 15: scope=my, admin → 都要守「自己 member」 invariant(避免見 196 個 E2E fixture)', () => {
+      const where = buildProjectListWhereForUser(
+        { scope: 'my' },
+        { id: 'admin-1', role: 'admin' },
+        null
+      )
+      expect(where.members).toEqual({ some: { userId: 'admin-1' } })
+      expect(where.OR).toBeUndefined()
+    })
+
+    test('Sprint 15: default scope (無帶 my), admin 仍然見晒(向後兼容)', () => {
+      // 唔帶 scope OR 帶 'default' 都應該係 admin 見晒
+      const where = buildProjectListWhereForUser(
+        {},
+        { id: 'admin-1', role: 'admin' },
+        null
+      )
+      expect(where.OR).toBeUndefined()
+      expect(where.members).toBeUndefined()
+    })
+
+    test('Sprint 15: scope=my + departmentId filter → 兩者 AND', () => {
+      // Developer u-1 屬 d-1 部門, scope=my 但 filter d-2
+      // 結果: (自己 member) AND departmentId=d-2
+      const where = buildProjectListWhereForUser(
+        { scope: 'my', departmentId: 'd-2' },
+        { id: 'u-1', role: 'developer' },
+        'd-1'
+      )
+      expect(where.members).toEqual({ some: { userId: 'u-1' } })
+      expect(where.departmentId).toBe('d-2')
     })
   })
 
