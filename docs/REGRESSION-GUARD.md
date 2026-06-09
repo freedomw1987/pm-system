@@ -427,3 +427,60 @@ describe('RG-XXX: <bug 簡述>', () => {
   - Backend:`backend/src/routes/attachments.ts` `GET /:id` 改用 RFC 5987 + `?inline=1` mode
   - Frontend:`utils/api.ts` `bugApi.get` + `attachmentApi.upload` type 加 'bug'
   - Layout:`components/Layout.tsx` sidebar 加「全部缺陷」nav item
+
+### RG-015: Developer PUT /api/tasks/:id 越權改 title / description — 2026-06-10 發現/修
+
+- **發現日期**: 2026-06-10(Sprint 12 收工後 `npx playwright test` 揭發,deeper 查係 RBAC fall-through bug)
+- **Scope**: 1 個真實 security-relevant bug,影響 PUT /api/tasks/:id 全部 field(title / description / assignee / parentTaskId / estimatedHours / assigneeIds / participantIds)
+- **Symptom**:
+  - `e2e/tests/project-kanban.spec.ts:284` 「RBAC: developer 改 status 只限於自己 assignee 嘅 task」fail — Expected 403, Received 200
+  - Manual reproduce: `dev@test.com` login 拎 developer token → PUT `/api/tasks/{id}` body `{ title: "hijacked" }` → backend 返 200 + 真係改咗 task title
+  - Description 越權: PUT `{ description: "hijacked desc" }` 都 200
+- **Root cause**:`backend/src/routes/tasks.ts:281-288` PUT /:id 嘅 RBAC gate 結構 fall-through:
+  ```ts
+  if (!user || (!hasPermission(user, 'tasks.edit') && user.role !== 'admin' && user.role !== 'tech_lead')) {
+    // Developers can only update status
+    if (user?.role === 'developer' && (title || description || ...)) {
+      return 403
+    }
+  }
+  ```
+  個 outer if 條件當 developer 有 `tasks.edit` perm(seed 入面 developer permissions 包括 `"tasks.edit"`)→ 個 `!hasPermission(user, 'tasks.edit')` 返 `false` → 個 outer `&&` chain 返 `false` → 唔入 outer if → 跳過 inner if 嘅 403 邏輯 → fall-through 落到 `prisma.task.update` → 改 title/description 成功(200)。**即係 developer perm 列表有 `tasks.edit` 反而 bypass 咗個 RBAC gate** — 邏輯反咗。
+- **Fix**:
+  1. 拎出純 function `canEditTaskFields(user)` 喺 `backend/src/routes/tasks.ts:28-37`
+     - admin / tech_lead → true(向後兼容)
+     - 有 `tasks.edit_fields` perm → true(opt-in for full edit,將來畀 developer 升呢用)
+     - 其他(包括 developer,即使有 `tasks.edit`) → false
+  2. PUT /:id handler 改用 explicit 結構(避免 fall-through):
+     ```ts
+     const hasEditFields = canEditTaskFields(user)
+     if (!hasEditFields) {
+       if (user?.role === 'developer' && (title || description || assigneeId !== undefined || ...)) {
+         set.status = 403
+         return { error: { code: 'FORBIDDEN', message: "Permission denied: developer can only update status" } }
+       }
+     }
+     ```
+  3. 嚴格化 field check 條件:用 `assigneeId !== undefined` 同 `parentTaskId !== undefined` 取代 truthy check(原 `assigneeId || parentTaskId` 會漏 `null` 值,PATCH API user 設返 null 嘅 case 漏 403)
+- **Prevention**:
+  - 任何「**per-field RBAC**」嘅 endpoint,inner if 一定要喺 explicit outer if 嘅 `else` branch 入面,唔可以入 outer if 內做 "if no perm, check secondary condition" 嘅 nested 邏輯,否則 primary condition 短路过 outer if 嗰陣個 secondary check 會 bypass
+  - 任何 conditional fall-through 嘅 RBAC 結構,都要有 unit test 守住「primary condition true → 二次 check 唔走」嘅 invariant
+  - 將 developer 嘅 `tasks.edit` perm 嘅語義 document 為「status-only」,fields edit 必須用 `tasks.edit_fields` perm(避免 permissive perm name 誤導 future maintainer)
+- **Regression test**: ✅ **2026-06-10 加**:
+  - **Backend unit**:`backend/src/routes/tasks.test.ts` `canEditTaskFields` describe — 9 test
+    - admin / tech_lead → true (×2 boundary)
+    - **developer + tasks.edit perm → false (核心 invariant,守 RG-015 個 bug 唔返轉)**
+    - developer + tasks.edit_fields perm → true(opt-in path)
+    - tester / pm (no tasks.edit_fields) → false
+    - pm + tasks.edit_fields perm → true
+    - null / undefined user → false
+    - custom role + tasks.edit_fields perm → true(將來 custom role 兼容)
+  - **E2E**:`e2e/tests/project-kanban.spec.ts:284` 「RBAC: developer 改 status 只限於自己 assignee 嘅 task」— 原本 fail,fix 後 pass
+- **驗證**:
+  - `bun test` → 601/601 pass(Sprint 12 592 + 9 new)
+  - Manual verify:`python3 /tmp/rbac_check.py` → 3 個 case all correct(status 200, title 403, description 403)
+  - Backend container 確認 fix 已 deploy: `docker exec pm-system-backend-1 grep canEditTaskFields /app/src/routes/tasks.ts` → 5 行 match
+- **Ref**:
+  - `backend/src/routes/tasks.ts` 拎出 `canEditTaskFields` 純 function + PUT /:id RBAC gate 結構重寫
+  - `backend/src/routes/tasks.test.ts` 加 9 個 unit test
+  - `e2e/tests/bugs-fix.spec.ts` `getSampleProjectId` helper 順手 patch(Sprint 8+ docker entrypoint 冇咗「範例」seed)— RG-015 唔直接 fix,但係同一個 Sprint 13 嘅 follow-up,3 個 spec bug 同時修

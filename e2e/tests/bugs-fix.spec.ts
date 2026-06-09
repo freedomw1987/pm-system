@@ -72,6 +72,16 @@ async function getFirstBugId(req: Page['request'], token: string): Promise<strin
 
 /**
  * 攞 sample project id(seeded by docker entrypoint)。
+ *
+ * 2026-06-10 Sprint 13 RG-015 follow-up:backend 嘅 seed 已經冇「範例」項目
+ * (Sprint 8+ docker entrypoint 重做咗,只有 E2E-PG-* fixture projects)。
+ * 跟 `e2e/tests/rbac-negative.spec.ts:173` 嘅 graceful pattern:
+ *   - 搵「範例」項目
+ *   - 冇就 fallback 去 projects[0]
+ *   - 連 fallback 都冇就自己建一個 fresh project
+ *
+ * 咁樣 spec 唔需要靠特定 seed data 都 pass,跟 docker entrypoint 嘅
+ * seed 演進保持 loose coupling。
  */
 async function getSampleProjectId(req: Page['request'], token: string): Promise<string> {
   const res = await req.get(`${BACKEND}/api/projects`, {
@@ -79,8 +89,17 @@ async function getSampleProjectId(req: Page['request'], token: string): Promise<
   })
   expect(res.status()).toBe(200)
   const body = await res.json()
-  const sample = body.projects.find((p: { id: string; name: string }) => p.name.includes('範例'))
-  expect(sample, 'expected a sample project to be seeded').toBeTruthy()
+  const projects = body.projects as Array<{ id: string; name: string }>
+  if (projects.length === 0) {
+    const createRes = await req.post(`${BACKEND}/api/projects`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { name: `E2E-bugsfix-fixture-${Date.now().toString(36)}`, description: 'auto-created for bugs-fix.spec' },
+    })
+    expect(createRes.status(), 'auto-create fixture project').toBe(200)
+    const created = await createRes.json()
+    return created.project.id as string
+  }
+  const sample = projects.find((p) => p.name.includes('範例')) ?? projects[0]
   return sample.id as string
 }
 

@@ -1,6 +1,10 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 12 closure,T15a + T15b done(US-5.6 PARTIAL → PASS-UNIT + PASS-E2E)
+> **Status**: 🟢 2026-06-10 — Sprint 13 closure,4 個 pre-existing E2E failure 全綠
+> **Update**: 2026-06-10 Sprint 13 — Pre-existing failure 修復 closure:
+>   - `bugs-fix.spec.ts` #5 attachments + #8 project card click (3 test): `getSampleProjectId` helper 改 graceful pattern(搵「範例」→ fallback `projects[0]` → 自己 create)— Sprint 8+ docker entrypoint 改咗 seed,RG-015 已經 patch 過一個 file,但呢個 file 仲未
+>   - `project-kanban.spec.ts` developer RBAC test: **backend 已 patch 過 RG-015**(`canEditTaskFields` 純 function + 9 個 boundary unit test),前次 fail 係 stale task + rate limit,backend source 早已 work
+>   - E2E:51 pass → 55 pass(+4),0 fail;Backend unit:601 pass(RG-015 後 592 → 601,+9 boundary test)
 > **Update**: 2026-06-10 Sprint 12 — US-5.6 由 PARTIAL 🟡 → **PASS-UNIT + PASS-E2E** 🟢🟢(`e2e/tests/project-detail-bug-tab.spec.ts` 4/4 pass,ProjectDetailPage bug tab create + rich text + image paste + client-side search filter 全綠;新 spec 揭發 3 個 implementation detail:bug row 冇 `/bugs/:id` link,search 係 client-side useMemo,Tiptap image paste 一定要走 handlePaste clipboard event path)
 > **Update**: 2026-06-09 收工 — Retro Sprint 11 follow-up registration:US-5.6 E2E DRAFT T15a (ProjectDetailPage bug tab create + rich text + image paste) + T15b (search filter) Sprint 11 planned;US-10.3 NONE-HOLD — client-side title search done,full-text search hold 等下個 epic 決定(tsvector / MeiliSearch)
 > **Update**: 2026-06-10 Sprint 10 — US-6.4 worklogs filter RBAC 由 NONE → PASS-UNIT(9 個 test,non-admin 強制 userId + admin departmentId gate),Unit 549→558(+9)
@@ -96,8 +100,8 @@
 | P0 US DEFERRED | **0** 🟢 |
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
-| Unit tests 總數 | **592 pass** (Sprint 10: 549 → 592,+43 — worklogs RBAC 9 + requirements rich-text 11 + tasks requirement link 6 + projects dept list 11 + projects summary 6) |
-| E2E tests | **56 pass + 8 skipped** (Sprint 12: +4 `project-detail-bug-tab.spec.ts` T15a setup/happy path + T15b filter/empty state,US-5.6 closure;6 個 Sprint 11 DEPRECATED 嘅 `/bugs` page tests 仲 skip) |
+| Unit tests 總數 | **601 pass** (Sprint 13: 592 → 601,+9 — RG-015 boundary case for `canEditTaskFields` developer RBAC,9 個 test 加喺 `tasks.test.ts` Sprint 10 已加但 tracker baseline 冇更新) |
+| E2E tests | **55 pass + 8 skipped** (Sprint 13: 51 → 55,+4 pre-existing failure 修復 — bugs-fix #5 + #8 共 3 test 用 graceful `getSampleProjectId`;project-kanban developer RBAC test 之前 stale + rate limit,Sprint 13 重跑 backend RG-015 已 work) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
 
@@ -129,6 +133,34 @@
 - **Backend unit**:`bun test` → 唔跑(spec 係純 frontend 行為)
 - **紅線狀態**:紅線 11(tracker)✅、紅線 12(P0 US 必須有 E2E)✅(US-5.6 P1,非強制但補咗)、紅線 13(無 bug fix,冇 RG entry) N/A
 - **US-5.6 狀態**:PARTIAL 🟡 → **PASS-UNIT + PASS-E2E** 🟢🟢(Sprint 12 closure)
+
+### Sprint 13 (2026-06-10) 收工摘要 — Pre-existing 4 個 E2E failure 修復
+
+- **目標**:Sprint 12 closure 收尾時發現 4 個 pre-existing E2E failure(`npx playwright test` 51 pass + 4 fail),修齊先至真正 ship-ready
+- **失敗清單**:
+  - `bugs-fix.spec.ts` #5 attachments image preview + lightbox — `getSampleProjectId` 搵「範例」失敗
+  - `bugs-fix.spec.ts` #8 project card click (test 466) — 共用 helper
+  - `bugs-fix.spec.ts` #8 project card click (test 494) — 共用 helper
+  - `project-kanban.spec.ts:284` developer PUT title 預期 403 收 200 — **疑似 RBAC bug**
+- **Root cause 發現**:
+  - **3 個 helper failure**:`getSampleProjectId` 假設有「範例」seed project,但 Sprint 8+ docker entrypoint 改咗,只有 E2E-PG-* fixture。同類 fix 喺 `rbac-negative.spec.ts:173`(RG-015 已 patch 過一個 file),`project-detail-bug-tab.spec.ts`(Sprint 12 補)同 `bugs-fix.spec.ts`(Sprint 11 補 — 但前次只係 comment 改,implementation 冇)都有
+  - **1 個 RBAC failure**:Backend **已經 patch 過 RG-015**(2026-06-10 之前) — `canEditTaskFields` 純 function + 9 個 boundary unit test,developer PUT title 返 403 早已 work。前次 fail 嘅 E2E 係 stale task data + IP rate limit(5 個 test 連 hit `127.0.0.1` 撞 counter)— 重跑時 backend RBAC 確認 work,test 已經 pass
+- **修法**:
+  - `bugs-fix.spec.ts` `getSampleProjectId` helper 改 graceful pattern(搵「範例」→ fallback `projects[0]` → 自己 create),`+21 / -2` line,+12 行 JSDoc 講清楚 why
+  - `backend/src/routes/tasks.ts` 唔需要改(RG-015 已 work)
+  - `tasks.test.ts` 唔需要加 test(RG-015 嘅 9 個 boundary test 已守 — admin/tech_lead/developer/tester/pm/custom role/null user/perm-only override)
+- **Verification**:
+  - `bun test` → **601 / 601 pass**(baseline 592 + 9 RG-015 已有 boundary test,tracker 之前漏計)
+  - `npx playwright test` → **55 / 55 pass + 8 skipped**(51 baseline + 4 修好,0 fail)
+  - 單跑 `project-kanban developer RBAC` test → 687ms pass,直接 `curl` 確認 developer PUT title 返 403 with `"Permission denied: developer can only update status"`
+- **意外發現**:
+  - **Backend source 早已 fix**:`docker exec pm-system-backend-1 cat /app/src/routes/tasks.ts` 確認有 `canEditTaskFields` + 完整 9 個 boundary case unit test
+  - **Tracker 數字 stale**:`Unit tests 總數 592` 漏咗 9 個 RG-015 test,真實係 601
+  - **同類 fix 三次**:seed 變咗嗰個 pattern(`getSampleProjectId`/`getFirstBugId`/`範例項目` fallback)已經喺 3 個 file 出現 — 應該下次抽 `_helpers.ts` 共享 helper
+- **紅線狀態**:紅線 11(tracker)✅、紅線 12(P0 US 必有 E2E)✅、紅線 13(無 user-reported bug fix)N/A(預防性 maintenance,RG-015 已經 cover 返)
+- **Out of scope(留俾下個 sprint)**:
+  - 抽 `getSampleProjectId` 共享 helper 入 `_helpers.ts`(避免 3 個 file 各自 re-implement)
+  - 把 `rbac-negative.spec.ts:173` 同 `bugs-fix.spec.ts` 同 `project-detail-bug-tab.spec.ts` 3 處 graceful pattern 統一
 
 🟢🟢 **8 個 P0 US 雙綠**(Sprint 8: 7 個) — Sprint 9 +US-11.2(工時 / 成本報告)由 NONE → 雙綠。
 🟢 **22 個 P0 US PASS-UNIT** — Sprint 9 +US-11.1(進度報告)由 NONE → PASS-UNIT。
