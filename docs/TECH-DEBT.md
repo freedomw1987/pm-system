@@ -236,6 +236,18 @@
 ### Backlog (P2)
 - [ ] TD-005, TD-006, TD-007, TD-009, TD-010
 
+### Sprint 18 (P0 + P1 cleanup) — ✅ DONE (2026-06-10)
+- [x] **TD-NEW-1**: Backend `/health` endpoint — 加 `GET /health` 返 `{status, db, uptime}` + docker-compose healthcheck 由 `/api/projects` (撞 401) 改 `/health` (200)。Backend container 終於 healthy。
+- [x] **TD-NEW-2**: `useTaskRecommendation` unit test — 19 個 bun test 守 3 個 pure helper (extractKeywords / scoreAgent / pickBestAgent) + 8-skill SKILL_KEYWORDS invariant,195ms 全綠。
+- [x] **TD-NEW-3**: TS `strictFunctionTypes` — 開咗,0 cascade error,RG-016 同類 arg arity bug 編譯期 catch。
+- [x] **TD-NEW-4**: FormEvent deprecate cleanup — 10 處 (`FormEvent` → `React.SyntheticEvent`),React 19 deprecate 警告 0 個。
+- [x] **TD-NEW-5**: AI FAB mobile collision — `Layout.tsx` FAB 由 `bottom-6 right-6 h-12 w-12` (sm: 同值) 改 `bottom-3 right-3 h-10 w-10 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14`。320px viewport 取消 / 建立任務 button 全部 clickable。
+- [x] **TD-NEW-6**: CreateBugModal unify — `CreateBugModal.tsx` (orphan) 拎走,`ProjectDetailPage` 內 local `AddBugModal` 抽出 `frontend/src/components/AddBugModal.tsx` 統一入口(extraFields slot 同 AddTaskModal pattern)。`newBugSeverity` state 改嚴格 type `low | medium | high | critical`。
+- [x] **TD-NEW-7**: EditTaskModal unify — 加 `extraFields?: ReactNode` + `submitLabel: string` + `titleText?: string` 入 AddTaskModal,EditTaskModal 由 75 行 inline JSX 改 36 行 thin wrapper (-52%),0 drift 風險。
+- [x] **TD-005**: Frontend error boundary — `ErrorBoundary` class component (React 19 唯一 stable option) 包住 `<Routes>`,render error → friendly fallback UI + 「重新整理頁面」button + console.error 留 debug。
+- **守住**:`docker compose up -d --build` 0 error + E2E 75 pass + 8 skipped, 0 fail(Sprint 17 baseline 69 → 75,+6 spec)
+- **紅線狀態**:紅線 11/12/13/15 全綠(strict + unify + error boundary + formevent migration 全部跟住既有 pattern 唔違反 invariant)
+
 ---
 
 ## 變更歷史
