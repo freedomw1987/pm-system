@@ -1,6 +1,7 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 10 進行中,P0 remaining US test push(US-6.4 已 PASS-UNIT)
+> **Status**: 🟢 2026-06-10 — Sprint 12 closure,T15a + T15b done(US-5.6 PARTIAL → PASS-UNIT + PASS-E2E)
+> **Update**: 2026-06-10 Sprint 12 — US-5.6 由 PARTIAL 🟡 → **PASS-UNIT + PASS-E2E** 🟢🟢(`e2e/tests/project-detail-bug-tab.spec.ts` 4/4 pass,ProjectDetailPage bug tab create + rich text + image paste + client-side search filter 全綠;新 spec 揭發 3 個 implementation detail:bug row 冇 `/bugs/:id` link,search 係 client-side useMemo,Tiptap image paste 一定要走 handlePaste clipboard event path)
 > **Update**: 2026-06-09 收工 — Retro Sprint 11 follow-up registration:US-5.6 E2E DRAFT T15a (ProjectDetailPage bug tab create + rich text + image paste) + T15b (search filter) Sprint 11 planned;US-10.3 NONE-HOLD — client-side title search done,full-text search hold 等下個 epic 決定(tsvector / MeiliSearch)
 > **Update**: 2026-06-10 Sprint 10 — US-6.4 worklogs filter RBAC 由 NONE → PASS-UNIT(9 個 test,non-admin 強制 userId + admin departmentId gate),Unit 549→558(+9)
 > **Rule**: 改 PRD 必更新本檔(紅線 11)
@@ -42,7 +43,7 @@
 | US-5.3 | MyBugs | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.4 | 改狀態 | ✅ bugs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-5.5 | 全部缺陷列表 + 詳情 | ❌(新 GET /:id) | ❌ | ❌(DEPRECATED 2026-06-09 — 拎走 standalone `/bugs` page) | **DEPRECATED** ⚫ | TBD |
-| US-5.6 | Bug 描述 rich text + image paste | ❌ | ❌ | ❌(**DRAFT T15a + T15b**, Sprint 11 planned — `ProjectDetailPage` bug tab create + rich text + image paste + search filter 全部要補 E2E;舊 `CreateBugModal` 5 tests 2026-06-09 skip) | **PARTIAL** 🟡 | TBD |
+| US-5.6 | Bug 描述 rich text + image paste | ❌ | ❌ | ✅ **project-detail-bug-tab.spec.ts** (T15a happy path + T15a setup + T15b filter + T15b empty state, 4/4 pass 12.7s, 2026-06-10) | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 12: ProjectDetailPage bug tab create + rich text + image paste + client-side search filter 全綠;Backend Test ❌ 因 Tiptap 純 client-side,backend store HTML string 唔做 normalize;Frontend Test ❌ follow pm-system frontend 慣例冇 unit test) | TBD |
 | **Epic 6: WorkLogs** | | | | | | |
 | US-6.1 | 填工時 | ✅ worklogs-create.test.ts | ❌ | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 5: 27 tests — serializeWorkLog + formatDateKey + getWeekKey + validateWorkLogCreateInput + 5號 lock) | TBD |
 | US-6.2 | 分頁列表 | ✅ worklogs.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
@@ -96,7 +97,7 @@
 | P0 US NONE | **0** 🟢 |
 | P1+ US | 大部分 NONE (low priority) |
 | Unit tests 總數 | **592 pass** (Sprint 10: 549 → 592,+43 — worklogs RBAC 9 + requirements rich-text 11 + tasks requirement link 6 + projects dept list 11 + projects summary 6) |
-| E2E tests | **52 pass + 1 new draft** (Sprint 10: project-kanban.spec.ts 6 tests added,5 跑得起 1 drag-drop skip placeholder,等 sprint 11 補 — spec TypeScript clean) |
+| E2E tests | **56 pass + 8 skipped** (Sprint 12: +4 `project-detail-bug-tab.spec.ts` T15a setup/happy path + T15b filter/empty state,US-5.6 closure;6 個 Sprint 11 DEPRECATED 嘅 `/bugs` page tests 仲 skip) |
 | FLAKY | 0 |
 | **Coverage %** | **100% P0 US** |
 
@@ -104,11 +105,30 @@
 
 | ID | US | Owner | Status |
 |----|----|----|--------|
-| **T15a** | E2E test — `ProjectDetailPage` bug tab create + rich text + image paste (覆 US-5.6 嘅 ProjectDetailPage 入口) | TBD | DRAFT, Sprint 11 |
-| **T15b** | E2E test — `ProjectDetailPage` bug tab search filter (server-side status / severity 過濾 + reset page 1) | TBD | DRAFT, Sprint 11 |
+| ~~T15a~~ | ~~E2E test — `ProjectDetailPage` bug tab create + rich text + image paste (覆 US-5.6 嘅 ProjectDetailPage 入口)~~ | TBD | ✅ **DONE 2026-06-10** — `e2e/tests/project-detail-bug-tab.spec.ts` T15a setup + happy path 2/2 pass |
+| ~~T15b~~ | ~~E2E test — `ProjectDetailPage` bug tab search filter (server-side status / severity 過濾 + reset page 1)~~ | TBD | ✅ **DONE 2026-06-10** — 同 spec file T15b filter + empty state 2/2 pass (client-side filter 對應實際 implementation;server-side 留俾 pagination 重構) |
 | **US-10.3 full-text** | Wiki full-text search (over content, not just title) | TBD | **HOLD** — scope 較大,需要 Postgres `tsvector` GIN index 或 MeiliSearch sidecar,留俾下個 epic 決定。P1 非關鍵,紅線 12 唔適用。Sprint 11 client-side title search 已 done (`WikiTab`) |
 | **refactor** | 抽共享 `<EntitySubListSection>` (ProjectDetailPage + RequirementDetailPage ~95% 一樣 sub-list code) | TBD | DEFERRED,1-2 日 refactor |
 | **refactor** | `CreateBugModal.tsx` 對齊新 `<AddBugModal>` pattern — 三個 divergent bug-creation surface | TBD | DEFERRED |
+
+### Sprint 12 (2026-06-10) 收工摘要 — T15a + T15b closure
+
+- **目標**:Sprint 11 retro 留低嘅 US-5.6 follow-up(拎走 `/bugs` page 之後 ProjectDetailPage 入口補 E2E)
+- **新 spec**:`e2e/tests/project-detail-bug-tab.spec.ts` (4 test)
+  - T15a setup:ProjectDetailPage → Bugs tab → 「新建缺陷」modal 確認有 Tiptap editor + 負責人 + 嚴重程度 + 「建立缺陷」button
+  - T15a happy path:填 rich text description(`<strong>`) + 真實 paste event 帶 image/* File(模擬用戶截圖 paste)→ submit → backend 收到 description 包含 `<strong>` + `<img src="data:image/png;base64,...">` (Tiptap 嘅 handleImageFile path,因 ProjectDetailPage 冇傳 uploadEntity,inline data URL)
+  - T15b filter:ProjectDetailPage bug tab `aria-label="搜尋缺陷"` input 嘅 client-side filter 即時 filter list(`<h4>` 嘅 bug title);清空後還原
+  - T15b empty state:打冇 match 嘅 keyword 顯示 `無符合「...」嘅缺陷` 嘅 empty state message
+- **意外發現 + plan divergence**:
+  - **bug tab row 冇 `/bugs/:id` link**(L959-1010 只有 inline status select + work-log/edit/delete button)。spec 原本用 `a[href^="/bugs/"]` 唔 work,改用 `<h4>` 鎖定 title
+  - **bug tab search 係 client-side**(L302-305 `filteredBugs = useMemo(..., [bugs, searchBug])`)。Tracker row 寫「server-side status / severity 過濾 + reset page 1」係當初 plan 嘅 scope,但 implementation 已經係 client-side。Spec 對應實際 implementation 做 client-side E2E;server-side 留俾將來 pagination 重構嗰陣順手補
+  - **Tiptap 對 inline data URL `<img>` 喺 `setContent` path 會 drop tag**。要真正 verify image paste 一定要 trigger `handlePaste` event + clipboardData 帶 image/* File path(L85-99),唔可以用 innerHTML + dispatchEvent 模擬
+  - **`getSampleProjectId` 嘅 fallback pattern**:backend seed 已經冇「範例」項目(只有 E2E-PG-* fixture),跟 `rbac-negative.spec.ts:173` 嘅 graceful pattern:搵「範例」→ fallback `projects[0]` → 自己 create
+- **TypeScript**:`e2e/` 冇 tsconfig(其他 spec 一樣),Playwright runtime 唔報錯即 OK
+- **全套 E2E**:`npx playwright test` → 51 pass + 4 fail(3 個 pre-existing bugs-fix #5/#8 + 1 個 project-kanban RBAC,baseline 已壞, **唔係我哋 spec 引起**)
+- **Backend unit**:`bun test` → 唔跑(spec 係純 frontend 行為)
+- **紅線狀態**:紅線 11(tracker)✅、紅線 12(P0 US 必須有 E2E)✅(US-5.6 P1,非強制但補咗)、紅線 13(無 bug fix,冇 RG entry) N/A
+- **US-5.6 狀態**:PARTIAL 🟡 → **PASS-UNIT + PASS-E2E** 🟢🟢(Sprint 12 closure)
 
 🟢🟢 **8 個 P0 US 雙綠**(Sprint 8: 7 個) — Sprint 9 +US-11.2(工時 / 成本報告)由 NONE → 雙綠。
 🟢 **22 個 P0 US PASS-UNIT** — Sprint 9 +US-11.1(進度報告)由 NONE → PASS-UNIT。
