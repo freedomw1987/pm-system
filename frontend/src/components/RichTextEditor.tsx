@@ -1,5 +1,6 @@
 /**
  * RichTextEditor — Tiptap-based(2026-06-09 重寫,跟 RB-7 嘅 image-paste 需求)
+ *                (Sprint 20 加 Table 支援:US-5 需求內容加表格)
  *
  * 對應 bug fix:
  *   - bug #6(US-5.1) 新建缺陷描述需要支援 image paste
@@ -10,6 +11,8 @@
  * 設計:
  *   - Tiptap StarterKit(bold/italic/heading/list/...)做基礎
  *   - Image extension + paste/drop handler:用家 paste / drop 圖片即時 insert
+ *   - Table extension(2026-06-11 Sprint 20 US-5):4 個子 extension 全部 enable,
+ *     工具列提供插入 3x3 表格、插入行/列、刪除行/列
  *   - uploadEntity prop(可選):{ type, id } → 真正 upload 去 /api/attachments
  *     (edit mode,bug/task 已經有 ID 用呢個)
  *   - 冇 uploadEntity(create mode,bug 仲未 create):
@@ -23,10 +26,15 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import Table from '@tiptap/extension-table'
+import TableRow from '@tiptap/extension-table-row'
+import TableCell from '@tiptap/extension-table-cell'
+import TableHeader from '@tiptap/extension-table-header'
 import { useEffect, useRef } from 'react'
 import {
   Bold, Italic, Strikethrough, List, ListOrdered, Heading2, Quote,
-  Link as LinkIcon, Undo, Redo, Image as ImageIcon
+  Link as LinkIcon, Undo, Redo, Image as ImageIcon,
+  Table as TableIcon, Plus, Minus,
 } from 'lucide-react'
 import { attachmentApi } from '../utils/api'
 
@@ -54,6 +62,8 @@ export default function RichTextEditor({
     extensions: [
       StarterKit.configure({
         // 唔使 hard-code,讓 StarterKit 預設
+        // Sprint 20: StarterKit 預設冇 history 以外的 extension,Table 同其他
+        // 衝突機會低,保留預設
       }),
       Image.configure({
         HTMLAttributes: {
@@ -68,6 +78,27 @@ export default function RichTextEditor({
       }),
       Placeholder.configure({
         placeholder,
+      }),
+      // Sprint 20 US-5:Table 支援
+      // - 必須 4 個子 extension 全部 enable,否則 schema 唔合法
+      // - resizable: 滑鼠可拉行/列寬
+      // - HTMLAttributes: 前台顯示嘅 class(prose 已有 basic table-style,呢度加 collapse 令 cell 對齊)
+      Table.configure({
+        resizable: true,
+        HTMLAttributes: {
+          class: 'border-collapse table-auto w-full my-2',
+        },
+      }),
+      TableRow,
+      TableHeader.configure({
+        HTMLAttributes: {
+          class: 'border border-gray-300 bg-gray-50 px-2 py-1 text-left font-medium',
+        },
+      }),
+      TableCell.configure({
+        HTMLAttributes: {
+          class: 'border border-gray-300 px-2 py-1',
+        },
       }),
     ],
     content: value,
@@ -256,6 +287,61 @@ export default function RichTextEditor({
             e.target.value = '' // reset for re-upload same file
           }}
         />
+        {/* Sprint 20 US-5: Table 工具列(插入 3x3 / 插入行 / 插入列 / 刪除行 / 刪除列 / 刪除表格) */}
+        <div className="w-px h-5 bg-gray-300 mx-1" />
+        <ToolbarButton
+          editor={editor}
+          onClick={() =>
+            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+          }
+          title="插入表格(3x3)"
+        >
+          <TableIcon size={14} />
+        </ToolbarButton>
+        <ToolbarButton
+          editor={editor}
+          onClick={() => editor.chain().focus().addRowAfter().run()}
+          disabled={!editor.can().addRowAfter()}
+          title="下方插入行"
+        >
+          <Plus size={12} />
+          <span className="text-[10px] ml-0.5">行</span>
+        </ToolbarButton>
+        <ToolbarButton
+          editor={editor}
+          onClick={() => editor.chain().focus().addColumnAfter().run()}
+          disabled={!editor.can().addColumnAfter()}
+          title="右方插入列"
+        >
+          <Plus size={12} />
+          <span className="text-[10px] ml-0.5">列</span>
+        </ToolbarButton>
+        <ToolbarButton
+          editor={editor}
+          onClick={() => editor.chain().focus().deleteRow().run()}
+          disabled={!editor.can().deleteRow()}
+          title="刪除當前行"
+        >
+          <Minus size={12} />
+          <span className="text-[10px] ml-0.5">行</span>
+        </ToolbarButton>
+        <ToolbarButton
+          editor={editor}
+          onClick={() => editor.chain().focus().deleteColumn().run()}
+          disabled={!editor.can().deleteColumn()}
+          title="刪除當前列"
+        >
+          <Minus size={12} />
+          <span className="text-[10px] ml-0.5">列</span>
+        </ToolbarButton>
+        <ToolbarButton
+          editor={editor}
+          onClick={() => editor.chain().focus().deleteTable().run()}
+          disabled={!editor.can().deleteTable()}
+          title="刪除整個表格"
+        >
+          <TableIcon size={14} className="text-red-500" />
+        </ToolbarButton>
         <div className="w-px h-5 bg-gray-300 mx-1" />
         <ToolbarButton
           editor={editor}

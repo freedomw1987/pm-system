@@ -526,6 +526,80 @@ Authorization: Bearer <refreshToken>
 }
 ```
 
+### GET /reports/by-department
+
+部門視角報表 — 跨項目聚合部門成員嘅工作時數 + 進度指標
+
+**Query Parameters**
+- `departmentId`: 部門 ID（可選，不傳則列全部部門）
+- `startDate`: 起始日期 `YYYY-MM-DD`（可選，過濾 workLog 日期）
+- `endDate`: 結束日期 `YYYY-MM-DD`（可選，過濾 workLog 日期）
+
+**Response**
+```json
+{
+  "departments": [
+    {
+      "department": { "id": "uuid", "name": "研發部" },
+      "totalHours": 240.5,
+      "userCount": 8,
+      "projectBreakdown": [
+        { "projectId": "uuid", "name": "電商 v2", "totalHours": 120 }
+      ],
+      "userBreakdown": [
+        { "userId": "uuid", "name": "張三", "email": "a@x", "totalHours": 40 }
+      ],
+      "totalRequirements": 20,
+      "completedRequirements": 12,
+      "requirementsProgress": 60,
+      "totalTasks": 50,
+      "completedTasks": 30,
+      "tasksProgress": 60,
+      "openBugs": 5
+    }
+  ]
+}
+```
+
+### GET /reports/by-user
+
+個人視角報表 — 每位用戶嘅工作時數、任務/項目分佈、每日小時序列
+
+**Query Parameters**
+- `userId`: 用戶 ID（可選，不傳則列全部非 agent 用戶）
+- `startDate`: 起始日期 `YYYY-MM-DD`（可選）
+- `endDate`: 結束日期 `YYYY-MM-DD`（可選，傳埋會自動補齊中間冇 log 嘅日子為 0）
+
+**Response**
+```json
+{
+  "users": [
+    {
+      "user": {
+        "id": "uuid",
+        "name": "張三",
+        "email": "a@x",
+        "department": { "id": "uuid", "name": "研發部" }
+      },
+      "totalHours": 168.5,
+      "projectBreakdown": [
+        { "projectId": "uuid", "name": "電商 v2", "totalHours": 120 }
+      ],
+      "taskBreakdown": [
+        { "taskId": "uuid", "title": "登入頁", "hours": 8, "isBug": false }
+      ],
+      "dailyHours": [
+        { "date": "2026-06-01", "hours": 8 },
+        { "date": "2026-06-02", "hours": 7.5 }
+      ],
+      "logCount": 21
+    }
+  ]
+}
+```
+
+> **權限**：以上 3 個 `/reports/*` endpoint 均需 `reports.view` 權限（或 admin / pm 角色向後相容）。
+
 ---
 
 ## 附件

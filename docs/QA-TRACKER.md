@@ -1,6 +1,13 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-10 — Sprint 17 closure,AddTaskModal Kanban + Task Tab 統一 + E2E regression guard,Sprint 15/16 確認 PASS
+> **Status**: 🟢 2026-06-11 — Sprint 20 closure,Reports 多視角 + 導出 + 4 個 UX 改進,Backend unit 645 pass,Frontend component 88 pass
+> **Update**: 2026-06-11 Sprint 20 — Reports 多視角 + Excel/PDF 導出 + 4 個 UX 改進:
+>   - **Backend** 2 個新 endpoint:`GET /reports/by-department`(部門視角,跨項目聚合成員時數+進度)、`GET /reports/by-user`(個人視角,每日小時序列填 0 補齊)+ 既有 `tasks` / `bugs` PUT 加 `requirementIds` / `requirementId` 支援
+>   - **Frontend** `ReportsPage` 完全重寫為 3 視角 tab(📊 項目 / 🏢 部門 / 👤 個人),每視角右上有 📥 Excel + 📄 PDF 按鈕;3 個新 autocomplete 共用元件(`UserAutocomplete` / `DepartmentAutocomplete` / `RequirementAutocomplete`)+ `pdfExport.ts` 工具(jspdf-autotable,中文字型 fallback 英文表頭)
+>   - **UX 改進**:WorkLogs 人員下拉改 Autocomplete(按部門聯動過濾)、RequirementModal 容器 max-h + overflow-y-auto(footer submit 鈕固定可見)+ 全寬 toggle(Maximize2/Minimize2)、RichTextEditor 加 Tiptap Table extension 4 個 + 工具列 6 個按鈕(插入表格/+行/+列/-行/-列/刪除)、AddTask/AddBug 透過 `extraFields` slot 加 requirement 關聯
+>   - **測試**:`UserAutocomplete.test.tsx` 9 tests + `pdfExport.test.ts` 2 tests + `reports.test.ts` +12 tests(by-department 4 + by-user 5 + fillDailyRange 3);Backend 638→645(+7 new aggregation helper),Frontend 76→88(+12 new),`tsc --noEmit` 0 errors frontend,backend 0 新錯誤
+>   - **Tech debt 留底**:PDF 中文字型 fallback 屬已知限制,等下個 epic 引入 NotoSansCJK(USER-MANUAL 未更新,留待 product 文檔 sprint 處理)
+>   - **Retro**:`docs/retros/2026-06-11-sprint-20-reports-and-export.md`
 > **Update**: 2026-06-10 Sprint 17 — AddTaskModal unification + E2E regression guard:
 >   - **Frontend** `AddTaskModal.tsx` 新 component(216 行 single source of truth),`ProjectKanban` + `ProjectDetailPage > Task Tab` 兩個入口共用,Kanban 原 76-line inline modal 拎走(原本缺 RichText / 智能分配 / 參與人 / 父任務 4 個 feature,UI drift 嘅 textbook)
 >   - **E2E:63/63 → 66/66 + 8 skipped**(+3 新 spec `add-task-modal-unified.spec.ts` 8.1s pass,守住「兩個入口 modal field set set-diff = ∅」嘅 cross-entry invariant),Backend unit 606 pass(無 backend 改)
@@ -48,12 +55,12 @@
 | US-3.2 | 分派 | ✅ requirements.test.ts | ❌ | ✅ requirements-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
 | US-3.3 | MyRequirements | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
 | US-3.4 | 改狀態 | ✅ requirements.test.ts | ❌ | ✅ requirements-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
-| US-3.5 | 富文本 | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 11 tests — Tiptap `<p></p>` normalize → '' + null/undefined round-trip safe + 複雜 HTML 保持 fidelity + isMeaningful 5 cases) | TBD |
+| US-3.5 | 富文本 + Table | ✅ requirements.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 11 tests — Tiptap normalize;Sprint 20: RichTextEditor 加 `@tiptap/extension-table` 4 個子包,工具列 6 個按鈕,4 個現有 caller zero 改動繼承表格能力) | TBD |
 | **Epic 4: Tasks** | | | | | | |
 | US-4.1 | 建任務 | ✅ tasks.test.ts | ✅ LoginForm.test.tsx | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
 | US-4.2 | MyTasks | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ✅ tasks-mytasks-status.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | US-4.3 | Kanban 改狀態 | ✅ tasks.test.ts + tasks-extended.test.ts | ❌ | ✅ tasks-mytasks-status.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
-| US-4.4 | 需求↔任務 link | ✅ tasks.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 6 tests — buildTaskListWhere requirementId filter 3 + resolveTaskProjectId cross-project guard 3) | TBD |
+| US-4.4 | 需求↔任務 link | ✅ tasks.test.ts | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 10: 6 tests — buildTaskListWhere requirementId filter 3 + resolveTaskProjectId cross-project guard 3;Sprint 20: AddTaskModal / EditTaskModal 透過 `extraFields: ReactNode` slot 注入 `<RequirementAutocomplete>`,backend task PUT 加 `requirementIds: string[]` 支援,deleteMany + create pattern 同 participants 一致) | TBD |
 | US-4.5 | Project Kanban | ✅ tasks.test.ts (US-4.4 source) | ❌ | ✅ project-kanban.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 10: API round-trip status persistence 3 + RBAC 1 + UI column display 1 + UI count consistency 1 + drag-drop placeholder 1 — 留待 sprint 11 補) | TBD |
 | **Epic 5: Bugs** | | | | | | |
 | US-5.1 | 建 Bug | ✅ bugs.test.ts | ✅ LoginForm.test.tsx | ✅ bugs-fix | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
@@ -66,7 +73,7 @@
 | US-6.1 | 填工時 | ✅ worklogs-create.test.ts | ✅ LoginForm.test.tsx | ✅ critical-path | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +6 frontend validation tests) | TBD |
 | US-6.2 | 分頁列表 | ✅ worklogs.test.ts | ❌ | ✅ worklogs-filter.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
 | US-6.3 | Excel 匯出 | ✅ worklogs.test.ts (limit=-1) | ❌ | ❌ | **PASS-UNIT** 🟢 | TBD |
-| US-6.4 | 部門/用戶篩選 | ✅ worklogs.test.ts | ❌ | ✅ worklogs-filter.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
+| US-6.4 | 部門/用戶篩選 | ✅ worklogs.test.ts | ✅ UserAutocomplete.test.tsx (9 tests — filterUsers pure logic) | ✅ worklogs-filter.spec.ts | **PASS-UNIT + PASS-E2E + Frontend** 🟢🟢 (Sprint 19: +2 E2E;Sprint 20: 人員下拉改 `<UserAutocomplete filterByDepartmentId={...}>` 按部門聯動過濾,部門下拉改 `<DepartmentAutocomplete>`) | TBD |
 | **Epic 7: RBAC** | | | | | | |
 | US-7.1 | 自定義角色 | ✅ roles.test.ts | ❌ | ✅ rbac-roles.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
 | US-7.2 | 改用戶角色 | ✅ roles.test.ts | ❌ | ✅ rbac-roles.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +2 E2E) | TBD |
@@ -95,6 +102,8 @@
 | US-11.1 | 進度 | ✅ reports.test.ts | ❌ | ✅ reports.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
 | US-11.2 | 工時 | ✅ reports.test.ts | ❌ | ✅ pagination (T14h cost leak) | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 9: 成本報告用 `where.OR` 同 worklogs 對齊) | TBD |
 | US-11.3 | Token | ✅ tokenlogs-stats.test.ts (shares with US-9.5) | ✅ LLMAgentForm.test.tsx | ✅ token-report.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +4 E2E) | TBD |
+| US-11.4 | 多視角(項目/部門/個人) | ✅ reports.test.ts (+12 aggregation helper tests) | ❌ | ❌ | **PASS-UNIT** 🟢 (Sprint 20: 新增 `GET /reports/by-department` + `GET /reports/by-user` 2 個 endpoint,ReportsPage 改寫為 3 視角 tab,時間段 + 快捷範圍,後端日期 gte/lte 過濾 + 個人視角每日序列填 0 補齊) | TBD |
+| US-11.5 | 報表導出 Excel/PDF | ❌ | ✅ pdfExport.test.ts (2 tests) | ❌ | **PARTIAL-Frontend** 🟡 (Sprint 20: `pdfExport.ts` 包 jspdf-autotable;Excel 沿用 ExcelJS pattern;每視角右上角有 📥 Excel + 📄 PDF 按鈕;中文字型 fallback 英文表頭為已知限制,留後續 epic 引入 NotoSansCJK;Backend 唔需要 — 純前端導出) | TBD |
 | **Epic 12: Departments** | | | | | | |
 | US-12.1 | 建部門 | ✅ departments.test.ts (25 tests) | ❌ | ✅ departments-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +3 E2E) | TBD |
 | US-12.2 | 分派用戶 | ✅ departments.test.ts (shares with US-12.1) | ❌ | ✅ departments-crud.spec.ts | **PASS-UNIT + PASS-E2E** 🟢🟢 (Sprint 19: +1 E2E) | TBD |
