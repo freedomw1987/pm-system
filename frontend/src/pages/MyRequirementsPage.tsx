@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileText, CheckCircle, Edit2, Trash2, X, Plus } from 'lucide-react'
+import { FileText, CheckCircle, Edit2, Trash2, Plus } from 'lucide-react'
 import { requirementApi, projectApi } from '../utils/api'
 import { hasAnyPermission } from '../utils/permissions'
 import type { Requirement, Project } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
+import FullscreenModal from '../components/FullscreenModal'
 import Pagination from '../components/Pagination'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
+import { migrateDataUrlsToAttachments } from '../utils/descriptionAttachments'
 
 export default function MyRequirementsPage() {
   const { user } = useAuth()
@@ -71,7 +73,22 @@ export default function MyRequirementsPage() {
     if (!newTitle.trim() || !newProjectId) return
     setIsAdding(true)
     try {
-      await requirementApi.create(newProjectId, { title: newTitle, description: newDesc, priority: newPriority })
+      // Step 1: create 拎新 ID
+      const createRes = await requirementApi.create(newProjectId, { title: newTitle, description: newDesc, priority: newPriority })
+      const newReqId = createRes.data?.requirement?.id as string | undefined
+
+      // Step 2: 創建後如有 data URL 圖,upload 去 attachments + replace
+      if (newReqId && newDesc && newDesc.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(newDesc, 'requirement', newReqId)
+          if (migrated !== newDesc) {
+            await requirementApi.update(newReqId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[MyRequirementsPage] data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
+
       setShowAddModal(false)
       setNewTitle(''); setNewDesc(''); setNewPriority('medium'); setNewProjectId('')
       loadRequirements()
@@ -97,9 +114,20 @@ export default function MyRequirementsPage() {
     if (!editingReq) return
     setIsEditing(true)
     try {
+      // 編輯模式時 RichTextEditor 有 uploadEntity,新 paste 嘅圖會直接 upload;
+      // 但 description 可能仲殘留舊 data URL(以前冇 uploadEntity 嘅時候 paste 落去嘅),
+      // save 之前 migrate 一次確保下次開返睇唔會再 render 唔到。
+      let finalDesc = editDesc
+      if (editDesc && editDesc.includes('data:image/')) {
+        try {
+          finalDesc = await migrateDataUrlsToAttachments(editDesc, 'requirement', editingReq.id)
+        } catch (migErr) {
+          console.warn('[MyRequirementsPage] data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
       await requirementApi.update(editingReq.id, {
         title: editTitle,
-        description: editDesc,
+        description: finalDesc,
         status: editStatus,
         priority: editPriority
       })
@@ -261,91 +289,97 @@ export default function MyRequirementsPage() {
       )}
 
       {/* Add Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">新建需求</h2>
-              <button onClick={() => setShowAddModal(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleAdd} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">所屬項目 *</label>
-                <select value={newProjectId} onChange={(e) => setNewProjectId(e.target.value)} className="input-field w-full" required>
-                  <option value="">-- 選擇項目 --</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">需求標題 *</label>
-                <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="input-field w-full" placeholder="例如：用戶登入功能" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={newDesc} onChange={setNewDesc} placeholder="需求的詳細描述..." rows={6} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
-                <select value={newPriority} onChange={(e) => setNewPriority(e.target.value)} className="input-field w-full">
-                  <option value="high">優先</option>
-                  <option value="medium">中等</option>
-                  <option value="low">較低</option>
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => setShowAddModal(false)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isAdding} className="btn-primary">{isAdding ? '創建中...' : '創建'}</button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="新建需求"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowAddModal(false)} className="btn-secondary">取消</button>
+            <button type="submit" form="myreq-add-form" disabled={isAdding} className="btn-primary">
+              {isAdding ? '創建中...' : '創建'}
+            </button>
+          </>
+        }
+      >
+        <form id="myreq-add-form" onSubmit={handleAdd} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">所屬項目 *</label>
+            <select value={newProjectId} onChange={(e) => setNewProjectId(e.target.value)} className="input-field w-full" required>
+              <option value="">-- 選擇項目 --</option>
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">需求標題 *</label>
+            <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="input-field w-full" placeholder="例如：用戶登入功能" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <RichTextEditor value={newDesc} onChange={setNewDesc} placeholder="需求的詳細描述..." rows={6} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
+            <select value={newPriority} onChange={(e) => setNewPriority(e.target.value)} className="input-field w-full">
+              <option value="high">優先</option>
+              <option value="medium">中等</option>
+              <option value="low">較低</option>
+            </select>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* Edit Modal */}
-      {editingReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">編輯需求</h2>
-              <button onClick={() => setEditingReq(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleEdit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">需求標題 *</label>
-                <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={editDesc} onChange={setEditDesc} rows={6} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-                  <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)} className="input-field w-full">
-                    <option value="pending">待處理</option>
-                    <option value="in_progress">進行中</option>
-                    <option value="completed">已完成</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
-                  <select value={editPriority} onChange={(e) => setEditPriority(e.target.value)} className="input-field w-full">
-                    <option value="high">優先</option>
-                    <option value="medium">中等</option>
-                    <option value="low">較低</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => setEditingReq(null)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isEditing} className="btn-primary">{isEditing ? '保存中...' : '保存'}</button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={!!editingReq}
+        onClose={() => setEditingReq(null)}
+        title="編輯需求"
+        footer={
+          <>
+            <button type="button" onClick={() => setEditingReq(null)} className="btn-secondary">取消</button>
+            <button type="submit" form="myreq-edit-form" disabled={isEditing} className="btn-primary">
+              {isEditing ? '保存中...' : '保存'}
+            </button>
+          </>
+        }
+      >
+        <form id="myreq-edit-form" onSubmit={handleEdit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">需求標題 *</label>
+            <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="input-field w-full" required />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            {/* 編輯模式已有 requirement ID,直接 upload 去 attachments 唔再用 data URL */}
+            <RichTextEditor
+              value={editDesc}
+              onChange={setEditDesc}
+              rows={6}
+              uploadEntity={editingReq ? { type: 'requirement', id: editingReq.id } : undefined}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+              <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)} className="input-field w-full">
+                <option value="pending">待處理</option>
+                <option value="in_progress">進行中</option>
+                <option value="completed">已完成</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
+              <select value={editPriority} onChange={(e) => setEditPriority(e.target.value)} className="input-field w-full">
+                <option value="high">優先</option>
+                <option value="medium">中等</option>
+                <option value="low">較低</option>
+              </select>
+            </div>
+          </div>
+        </form>
+      </FullscreenModal>
     </div>
   )
 }

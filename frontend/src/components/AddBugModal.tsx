@@ -16,8 +16,8 @@
  */
 
 import type { ReactNode } from 'react'
-import { X } from 'lucide-react'
 import RichTextEditor from './RichTextEditor'
+import FullscreenModal from './FullscreenModal'
 
 export interface MemberOption {
   id: string
@@ -45,6 +45,10 @@ export interface AddBugModalProps {
   // Future-proofing: 將來 RequirementDetailPage 想加 linking 唔需要 fork
   extraFields?: ReactNode
 
+  // 提供時,RichTextEditor 會把貼上嘅圖真正 upload 去 /api/attachments
+  // (CREATE 模式冇 ID,主 caller 喺 onSubmit 之後 migrate data URL → URL)
+  uploadEntity?: { type: 'bug'; id: string }
+
   // Submission
   submitLabel: string
   isSubmitting: boolean
@@ -64,6 +68,7 @@ export default function AddBugModal({
   setAssigneeId,
   assigneeOptions,
   extraFields,
+  uploadEntity,
   submitLabel,
   isSubmitting,
   onSubmit,
@@ -71,83 +76,77 @@ export default function AddBugModal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">新建缺陷</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 hover:bg-gray-100 rounded-lg"
-            aria-label="關閉"
-          >
-            <X size={20} />
+    <FullscreenModal
+      open={open}
+      onClose={onClose}
+      title="新建缺陷"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="btn-secondary">
+            取消
           </button>
+          <button
+            type="submit"
+            form="add-bug-form"
+            disabled={!title.trim() || isSubmitting}
+            className="btn-primary"
+          >
+            {isSubmitting ? '儲存中...' : submitLabel}
+          </button>
+        </>
+      }
+    >
+      <form id="add-bug-form" onSubmit={onSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="input-field w-full"
+            placeholder="輸入缺陷標題"
+            required
+            autoFocus
+          />
         </div>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="input-field w-full"
-              placeholder="輸入缺陷標題"
-              required
-              autoFocus
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-            <RichTextEditor
-              value={description}
-              onChange={setDescription}
-              placeholder="輸入缺陷描述"
-              rows={6}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
-            <select
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
-              className="input-field w-full"
-            >
-              <option value="low">輕微</option>
-              <option value="medium">中等</option>
-              <option value="high">高</option>
-              <option value="critical">嚴重</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-            <select
-              value={assigneeId}
-              onChange={(e) => setAssigneeId(e.target.value)}
-              className="input-field w-full"
-            >
-              <option value="">-- 不指定 --</option>
-              {assigneeOptions.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
-          {extraFields}
-
-          <div className="flex gap-3 justify-end pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary">
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={!title.trim() || isSubmitting}
-              className="btn-primary"
-            >
-              {isSubmitting ? '儲存中...' : submitLabel}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+          <RichTextEditor
+            value={description}
+            onChange={setDescription}
+            placeholder="輸入缺陷描述"
+            rows={6}
+            {...(uploadEntity ? { uploadEntity } : {})}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
+          <select
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
+            className="input-field w-full"
+          >
+            <option value="low">輕微</option>
+            <option value="medium">中等</option>
+            <option value="high">高</option>
+            <option value="critical">嚴重</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+          <select
+            value={assigneeId}
+            onChange={(e) => setAssigneeId(e.target.value)}
+            className="input-field w-full"
+          >
+            <option value="">-- 不指定 --</option>
+            {assigneeOptions.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        </div>
+        {extraFields}
+      </form>
+    </FullscreenModal>
   )
 }

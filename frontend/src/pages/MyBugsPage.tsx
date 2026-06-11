@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { AlertCircle, Bug, CheckCircle, Clock, PlayCircle } from 'lucide-react'
-import { bugApi, workLogApi } from '../utils/api'
+import { Link } from 'react-router-dom'
+import { AlertCircle, Bug, CheckCircle, Clock, PlayCircle, Eye, FolderKanban } from 'lucide-react'
+import { bugApi, workLogApi, projectApi } from '../utils/api'
 import type { Bug as BugType } from '../types'
 import clsx from 'clsx'
 import Pagination from '../components/Pagination'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
+import ProjectAutocomplete, { type ProjectOption } from '../components/ProjectAutocomplete'
 
 type BugFilter = 'all' | 'open' | 'in_progress' | 'resolved' | 'verified'
 type BugStatus = BugType['status']
@@ -31,30 +33,55 @@ export default function MyBugsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  // Issue 3 (Sprint 21): 項目篩選
+  const [filterProject, setFilterProject] = useState('')
+  const [projects, setProjects] = useState<ProjectOption[]>([])
+
   // Pagination (US-7.x) — server-side status filter
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
 
-  // Reset to page 1 whenever the status filter changes
+  // Reset to page 1 whenever the status or project filter changes
   useEffect(() => {
     setPage(1)
-  }, [filter])
+  }, [filter, filterProject])
 
   useEffect(() => {
     loadBugs()
-  }, [filter, page, pageSize])
+  }, [filter, filterProject, page, pageSize])
+
+  // Issue 3: 載入項目清單(供篩選 dropdown 用)
+  useEffect(() => {
+    loadProjects()
+  }, [])
+
+  const loadProjects = async () => {
+    try {
+      const res = await projectApi.list({ limit: -1 })
+      const opts: ProjectOption[] = (res.data.projects || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        department: p.department ?? null,
+      }))
+      setProjects(opts)
+    } catch (err) {
+      console.error('Failed to load projects for filter:', err)
+    }
+  }
 
   const loadBugs = async () => {
     setIsLoading(true)
     setError('')
     try {
-      const params: { status?: string; page: number; pageSize: number } = {
+      const params: { status?: string; projectId?: string; page: number; pageSize: number } = {
         page,
         pageSize,
       }
       if (filter !== 'all') params.status = filter
+      if (filterProject) params.projectId = filterProject
       const response = await bugApi.list(params)
       setBugs(response.data.bugs || [])
       setTotalCount(response.data.totalCount ?? response.data.bugs?.length ?? 0)
@@ -69,6 +96,12 @@ export default function MyBugsPage() {
 
   // US-7.x: server-side filter — returned list is already filtered
   const filteredBugs = bugs
+
+  // description 係 RichTextEditor 出嘅 HTML,list 預覽要 strip 走 tags
+  // 唔係會見到 "<p>xxx</p>" 嘅 raw HTML(同 ProjectDetailPage/RequirementDetailPage 一致)
+  // 接受 string | undefined 因為 Bug.description 喺 type 係 optional
+  const stripHtml = (html: string | undefined | null) =>
+    html?.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim() || ''
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -192,6 +225,32 @@ export default function MyBugsPage() {
         </div>
       </div>
 
+      {/* Issue 3 (Sprint 21): 項目篩選 */}
+      <div className="card p-3 sm:p-4 mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <FolderKanban size={16} className="text-gray-400" />
+          <span className="font-medium">項目</span>
+        </div>
+        <div className="flex-1 min-w-0 sm:max-w-xs">
+          <ProjectAutocomplete
+            value={filterProject}
+            onChange={(id) => setFilterProject(id || '')}
+            projects={projects}
+            placeholder="全部項目"
+            ariaLabel="篩選項目"
+          />
+        </div>
+        {filterProject && (
+          <button
+            type="button"
+            onClick={() => setFilterProject('')}
+            className="text-sm text-gray-500 hover:text-gray-700 underline self-start sm:self-auto"
+          >
+            清除
+          </button>
+        )}
+      </div>
+
       {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-100 text-red-700 px-4 py-3 text-sm">{error}</div>}
       {success && <div className="mb-4 rounded-lg bg-green-50 border border-green-100 text-green-700 px-4 py-3 text-sm">{success}</div>}
 
@@ -227,7 +286,9 @@ export default function MyBugsPage() {
                         {bug.reporter && <p className="text-xs text-gray-400 mt-1">回報者：{bug.reporter.name}</p>}
                       </div>
                     </div>
-                    <p className="text-gray-500 text-sm mb-3 break-words">{bug.description || '暫無描述'}</p>
+                    <p className="text-gray-500 text-sm mb-3 break-words">
+                      {stripHtml(bug.description) || '暫無描述'}
+                    </p>
                     <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm">
                       <span className={`badge ${getSeverityColor(bug.severity)}`}>
                         嚴重度：{getSeverityLabel(bug.severity)}
@@ -235,12 +296,27 @@ export default function MyBugsPage() {
                       <span className={`badge ${getStatusColor(bug.status)}`}>
                         {getStatusLabel(bug.status)}
                       </span>
+                      {bug.project && (
+                        <span className="inline-flex items-center gap-1 text-gray-500 break-all">
+                          <FolderKanban size={12} className="flex-shrink-0" />
+                          {bug.project.name}
+                        </span>
+                      )}
                       {bug.task && (
                         <span className="text-gray-500 break-all">關聯任務：{bug.task.title}</span>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row xl:flex-col gap-2 w-full sm:w-auto">
+                    {/* Issue 2 (Sprint 21): 跳轉到詳情頁 */}
+                    <Link
+                      to={`/bugs/${bug.id}`}
+                      className="btn-secondary flex items-center justify-center gap-2 text-sm px-4 py-2 w-full sm:w-auto"
+                      title="查看缺陷詳情"
+                    >
+                      <Eye size={16} />
+                      查看詳情
+                    </Link>
                     {nextStatus && (
                       <button
                         onClick={() => handleUpdateStatus(bug)}
