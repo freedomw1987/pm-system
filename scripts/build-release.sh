@@ -16,6 +16,8 @@
 #   pm-system-frontend-v1.0.0-arm64.tar
 #   pm-system-backend-v1.0.0-amd64.tar
 #   pm-system-backend-v1.0.0-arm64.tar
+#   pm-system-postgres-v1.0.0-amd64.tar     ← 客戶機無法 docker pull,
+#   pm-system-postgres-v1.0.0-arm64.tar     ←   所以 build 環境預先 pull + save
 #   CHECKSUMS.sha256
 #   RELEASE-NOTES.md
 # ============================================================
@@ -31,6 +33,11 @@ if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "❌ 版本格式要 vX.Y.Z (e.g. v1.0.0), 你入嘅: $VERSION"
   exit 1
 fi
+
+# ── External images (客戶環境拉唔到,build 環境預先 pull + save) ──
+# ⚠️ 保持同 deploy/docker-compose.client.yml 嘅 db.image 一致
+# 想用 mirror 例: POSTGRES_IMAGE=mirror.baidubce.com/library/postgres:15-alpine ./scripts/build-release.sh v1.0.0
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
 
 # ── 預備 ─────────────────────────────────────────────────────
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -88,6 +95,36 @@ build_one frontend linux/arm64 arm64
 build_one backend  linux/amd64 amd64
 build_one backend  linux/arm64 arm64
 
+# ── Pull 2: 抽 external image 落 tarball (客戶機拉唔到,build 環境預先 bundle) ─
+# 用 docker pull --platform 攞對應 arch 嘅 image
+# 然後 re-tag 做 pm-system-{service}:$VERSION-$SUFFIX 保持命名一致
+# 注意:第 2 次 pull 會覆蓋本地 $IMAGE tag,所以每次 pull 完要即刻 re-tag
+pull_external() {
+  local IMAGE="$1"        # e.g. postgres:15-alpine
+  local SERVICE="$2"      # e.g. postgres
+  local PLATFORM="$3"     # e.g. linux/amd64
+  local SUFFIX="$4"       # e.g. amd64
+
+  local TAG="pm-system-${SERVICE}:${VERSION}-${SUFFIX}"
+  local TAR="$DIST_DIR/pm-system-${SERVICE}-${VERSION}-${SUFFIX}.tar"
+
+  echo ""
+  echo "→ Pull $IMAGE for $PLATFORM (will re-tag: $TAG)"
+
+  # Pull 對應 arch(對 multi-arch image 都 work)
+  docker pull --platform="$PLATFORM" "$IMAGE"
+
+  # 即刻 re-tag,免得第 2 次 pull 覆蓋咗
+  docker tag "$IMAGE" "$TAG"
+
+  echo "→ Save $TAG → $TAR"
+  docker save -o "$TAR" "$TAG"
+  echo "  ✓ $(du -h "$TAR" | cut -f1)"
+}
+
+pull_external "$POSTGRES_IMAGE" postgres linux/amd64 amd64
+pull_external "$POSTGRES_IMAGE" postgres linux/arm64 arm64
+
 # ── Checksums ─────────────────────────────────────────────────
 echo ""
 echo "→ 計 CHECKSUMS.sha256"
@@ -97,7 +134,9 @@ echo "→ 計 CHECKSUMS.sha256"
     pm-system-frontend-${VERSION}-amd64.tar \
     pm-system-frontend-${VERSION}-arm64.tar \
     pm-system-backend-${VERSION}-amd64.tar \
-    pm-system-backend-${VERSION}-arm64.tar \
+    pm-system-backend-${VERSION}-amd64.tar \
+    pm-system-postgres-${VERSION}-amd64.tar \
+    pm-system-postgres-${VERSION}-arm64.tar \
     > CHECKSUMS.sha256
 )
 cat "$DIST_DIR/CHECKSUMS.sha256"
@@ -123,6 +162,7 @@ cat > "$RELEASE_NOTES" <<EOF
 \`\`\`bash
 ./install.sh
 # install.sh 自動偵測 arch(用 uname -m),揀返合 platform 嘅 tar load
+# 客戶機完全唔需要 docker pull(連 postgres 都預先 bundle 咗)
 \`\`\`
 
 ## Image contents (per-arch tarballs)
@@ -133,6 +173,8 @@ cat > "$RELEASE_NOTES" <<EOF
 | pm-system-frontend | arm64 | pm-system-frontend-${VERSION}-arm64.tar | $(du -h "$DIST_DIR/pm-system-frontend-${VERSION}-arm64.tar" | cut -f1) |
 | pm-system-backend  | amd64 | pm-system-backend-${VERSION}-amd64.tar  | $(du -h "$DIST_DIR/pm-system-backend-${VERSION}-amd64.tar"  | cut -f1) |
 | pm-system-backend  | arm64 | pm-system-backend-${VERSION}-arm64.tar  | $(du -h "$DIST_DIR/pm-system-backend-${VERSION}-arm64.tar"  | cut -f1) |
+| pm-system-postgres (from ${POSTGRES_IMAGE}) | amd64 | pm-system-postgres-${VERSION}-amd64.tar | $(du -h "$DIST_DIR/pm-system-postgres-${VERSION}-amd64.tar" | cut -f1) |
+| pm-system-postgres (from ${POSTGRES_IMAGE}) | arm64 | pm-system-postgres-${VERSION}-arm64.tar | $(du -h "$DIST_DIR/pm-system-postgres-${VERSION}-arm64.tar" | cut -f1) |
 
 ## Verification
 
@@ -152,5 +194,5 @@ echo ""
 echo "下一步:"
 echo "  1. 改 RELEASE-NOTES.md 入面 'TBD' 嗰段"
 echo "  2. 連同 deploy/docker-compose.client.yml + .env.client.example"
-echo "     + install.sh + README.md + 4 個 tar 全部包成 tarball 寄畀客戶"
+echo "     + install.sh + README.md + 6 個 tar 全部包成 tarball 寄畀客戶"
 echo "============================================================"

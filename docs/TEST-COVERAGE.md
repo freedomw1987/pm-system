@@ -1,8 +1,13 @@
+---
+id: TEST-COVERAGE
+aliases: []
+tags: []
+---
+
 # PM System — Test Coverage Report
 
-> **Status**: 2026-06-10 Sprint 19 snapshot
-> **Method**: `bun test` + `npx playwright test` + `bun run test` (frontend)
-> 所有 P0/P1/P2 US 100% 有起碼一種測試覆蓋
+> **Status**: 2026-06-11 snapshot (Sprint 20 closure)
+> **Method**: `find . -name "*.test.*" -not -path "*/node_modules/*"` 掃 source tree
 
 ---
 
@@ -10,10 +15,12 @@
 
 | Layer | Test Files | Test Count | 備註 |
 |-------|-----------|------------|------|
-| Backend Unit (`backend/src/**/*.test.ts`) | 30 | **678** | 所有 US Backend Test ✅ |
-| Frontend Unit (`frontend/src/**/*.test.tsx`) | 10 | **93** | Vitest + jsdom |
-| E2E (Playwright) | 21 | **94 pass + 8 skipped** | 所有 P0/P1/P2 E2E ✅ |
-| **Total** | **61** | **865 tests** | Sprint 19 完成 |
+| Backend Unit (`backend/src/**/*.test.ts`) | 7 | 645 | tasks + permission + worklogs + agents + reports + bugs + requirements |
+| Backend Integration | 0 | 0 | — |
+| Frontend Unit (`frontend/src/**/*.test.ts`) | 5 | 5 | authRefresh + permissions + pdfExport + (其他純邏輯 helpers) |
+| Frontend Component | 9 | 88 | BugsFrontend + LLMAgentForm + WorkLogsFrontend + RBACFrontend + LoginForm + RequirementsFrontend + TasksFrontend + ReportsFrontend + ProjectsFrontend + UserAutocomplete |
+| E2E (Playwright / Cypress) | 12 | 66 + 8 skipped | critical path + RBAC negative + profile + bugs-fix + 8 個 sprint 後續 |
+| **Total** | **33+** | **~810** | **~70% coverage (rough estimate, 視乎未跑 c8/nyc)** |
 
 ### E2E test files (4)
 
@@ -167,4 +174,9 @@
 | 2026-06-08 | Sprint 1 補 unit test (3 份,42 tests) |
 | 2026-06-08 | Sprint 1 補 E2E (1 份,3 tests) — Playwright + critical path |
 | 2026-06-08 | Sprint 1 補 E2E RBAC negative (1 份,10 tests) — US-7.3 真 HTTP level 守住 |
-| 2026-06-09 | Sprint 1 補 E2E profile (1 份,7 tests) — US-1.4 改密碼真 E2E + 揭咗 2 個 bug(ProfilePage URL + backend derive 唔覆蓋 /auth/*)|
+| 2026-06-09 | Sprint 1 補 E2E profile (1 份,7 tests) — US-1.4 改密碼真 E2E + 揭咗 2 個 bug(ProfilePage URL + backend derive 唔覆蓋 /auth/*) |
+| 2026-06-10 | Sprint 10 P0 unit test push — worklogs/requirements/tasks/projects 補 derive tests(+38) |
+| 2026-06-10 | Sprint 12 — `project-detail-bug-tab.spec.ts` 4 tests(US-5.6 E2E) |
+| 2026-06-10 | Sprint 15-17 — Dashboard scope=my、modal unify、E2E regression guard(66/66 + 8 skipped) |
+| 2026-06-10 | Sprint 19 — 全 US 測試覆蓋 12 份 component test 補齊(+88 tests) |
+| **2026-06-11** | **Sprint 20 — Reports 多視角 + 導出 + 4 個 UX 改進:`UserAutocomplete.test.tsx` 9 tests + `pdfExport.test.ts` 2 tests + `reports.test.ts` +12 aggregation helper tests(by-department 4 / by-user 5 / fillDailyRange 3);Backend 638→645(+7),Frontend 76→88(+12),0 fail** |

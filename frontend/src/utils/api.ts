@@ -166,7 +166,7 @@ export const bugApi = {
   get: (id: string) => api.get(`/bugs/${id}`),
   create: (data: { title: string; description?: string; taskId?: string; severity?: string; assigneeId?: string; requirementId?: string; projectId?: string }) =>
     api.post('/bugs', data),
-  update: (id: string, data: { title?: string; status?: string; description?: string; severity?: string; assigneeId?: string | null }) =>
+  update: (id: string, data: { title?: string; status?: string; description?: string; severity?: string; assigneeId?: string | null; requirementId?: string | null }) =>
     api.put(`/bugs/${id}`, data),
   updateStatus: (id: string, status: string) =>
     api.put(`/bugs/${id}`, { status }),
@@ -201,6 +201,11 @@ export const workLogApi = {
 export const reportApi = {
   cost: (projectId: string) => api.get('/reports/cost', { params: { projectId } }),
   progress: (projectId: string) => api.get('/reports/progress', { params: { projectId } }),
+  // Sprint 20 US-2: 部門 / 個人視角
+  byDepartment: (params?: { departmentId?: string; startDate?: string; endDate?: string }) =>
+    api.get('/reports/by-department', { params }),
+  byUser: (params?: { userId?: string; startDate?: string; endDate?: string }) =>
+    api.get('/reports/by-user', { params }),
 }
 
 // Attachment API

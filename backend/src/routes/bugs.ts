@@ -146,12 +146,14 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
   })
   // Update bug
   .put('/:id', async ({ params, body, set, user }) => {
-    const { title, status, description, severity, assigneeId } = body as {
+    const { title, status, description, severity, assigneeId, requirementId } = body as {
       title?: string
       status?: string
       description?: string
       severity?: string
       assigneeId?: string | null
+      // Sprint 20 US-6: 編輯缺陷時可改 / 解除關聯需求(null = 解除)
+      requirementId?: string | null
     }
 
     const existing = await prisma.bug.findUnique({ where: { id: params.id } })
@@ -172,7 +174,7 @@ const bugRoutes = new Elysia({ prefix: '/bugs' })
 
     const bug = await prisma.bug.update({
       where: { id: params.id },
-      data: { title, status, description, severity, assigneeId },
+      data: { title, status, description, severity, assigneeId, requirementId },
       include: {
         reporter: { select: { id: true, name: true } },
         assignee: { select: { id: true, name: true, email: true } },

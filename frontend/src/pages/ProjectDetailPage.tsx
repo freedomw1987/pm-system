@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle, Search, Clock } from 'lucide-react'
+import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle, Search, Clock, Maximize2, Minimize2 } from 'lucide-react'
 import { projectApi, requirementApi, taskApi, bugApi, userApi, roleApi, workLogApi } from '../utils/api'
 import { hasAnyPermission } from '../utils/permissions'
 import type { Project, Requirement, User, ProjectMember, Role, Task, Bug } from '../types'
@@ -13,6 +13,7 @@ import ToggleMultiSelect from '../components/ToggleMultiSelect'
 import Pagination from '../components/Pagination'
 import AddTaskModal, { type MemberOption } from '../components/AddTaskModal'
 import AddBugModal from '../components/AddBugModal'
+import RequirementAutocomplete, { type RequirementOption } from '../components/RequirementAutocomplete'
 import { useTaskRecommendation } from '../hooks/useTaskRecommendation'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
@@ -71,6 +72,8 @@ export default function ProjectDetailPage() {
   const [newTaskAssignee, setNewTaskAssignee] = useState('')
   const [newTaskParticipantIds, setNewTaskParticipantIds] = useState<string[]>([])
   const [newTaskParentId, setNewTaskParentId] = useState('')
+  // Sprint 20 US-6: 關聯需求(多選,task → TaskRequirement join table)
+  const [newTaskReqIds, setNewTaskReqIds] = useState<string[]>([])
   const [isAddingTask, setIsAddingTask] = useState(false)
   const [autoAssignAgent, setAutoAssignAgent] = useState(true)
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null)
@@ -83,6 +86,7 @@ export default function ProjectDetailPage() {
   const [editTaskParticipantIds, setEditTaskParticipantIds] = useState<string[]>([])
   const [editTaskParentId, setEditTaskParentId] = useState('')
   const [editTaskStatus, setEditTaskStatus] = useState('')
+  const [editTaskReqIds, setEditTaskReqIds] = useState<string[]>([])
   const [isEditingTask, setIsEditingTask] = useState(false)
 
   // ── Work log ─────────────────────────────────────────────────
@@ -101,6 +105,8 @@ export default function ProjectDetailPage() {
   const [newBugDesc, setNewBugDesc] = useState('')
   const [newBugSeverity, setNewBugSeverity] = useState<'low' | 'medium' | 'high' | 'critical'>('medium')
   const [newBugAssignee, setNewBugAssignee] = useState('')
+  // Sprint 20 US-6: 關聯需求(單選,bug.requirementId 是 nullable scalar)
+  const [newBugReqId, setNewBugReqId] = useState('')
   const [isAddingBug, setIsAddingBug] = useState(false)
 
   // Edit bug
@@ -110,6 +116,7 @@ export default function ProjectDetailPage() {
   const [editBugSeverity, setEditBugSeverity] = useState('')
   const [editBugStatus, setEditBugStatus] = useState('')
   const [editBugAssignee, setEditBugAssignee] = useState('')
+  const [editBugReqId, setEditBugReqId] = useState('')
   const [isEditingBug, setIsEditingBug] = useState(false)
 
   // Edit requirement
@@ -288,7 +295,9 @@ export default function ProjectDetailPage() {
         projectId: id,
         assigneeId: newTaskAssignee || undefined,
         participantIds: newTaskParticipantIds,
-        parentTaskId: newTaskParentId || undefined
+        parentTaskId: newTaskParentId || undefined,
+        // Sprint 20 US-6: 關聯需求(後端 task_requirements join table)
+        requirementIds: newTaskReqIds,
       })
 
       const taskId = result.data.task?.id
@@ -304,7 +313,7 @@ export default function ProjectDetailPage() {
       }
 
       setShowAddTaskModal(false)
-      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId('')
+      setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId(''); setNewTaskReqIds([])
       // Hook 監聽 newTaskTitle '' → auto-reset recommendedAgent
       loadProject()
     } catch (err) {
@@ -405,9 +414,17 @@ export default function ProjectDetailPage() {
     if (!newBugTitle.trim()) return
     setIsAddingBug(true)
     try {
-      await bugApi.create({ title: newBugTitle, description: newBugDesc, severity: newBugSeverity, assigneeId: newBugAssignee || undefined, projectId: id })
+      await bugApi.create({
+        title: newBugTitle,
+        description: newBugDesc,
+        severity: newBugSeverity,
+        assigneeId: newBugAssignee || undefined,
+        projectId: id,
+        // Sprint 20 US-6: 關聯需求(單選,bug.requirementId scalar)
+        requirementId: newBugReqId || undefined,
+      })
       setShowAddBugModal(false)
-      setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee('')
+      setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setNewBugReqId('')
       loadProject()
     } catch (err) {
       console.error(err)
@@ -425,6 +442,8 @@ export default function ProjectDetailPage() {
     setEditTaskParticipantIds(task.participants?.map(p => p.user.id).filter(Boolean) || [])
     setEditTaskParentId(task.parentTaskId || task.parentTask?.id || '')
     setEditTaskStatus(task.status)
+    // Sprint 20 US-6: 載入既有嘅需求關聯(task.requirements 是 join records array)
+    setEditTaskReqIds(task.requirements?.map(r => r.requirement.id).filter(Boolean) || [])
   }
 
   const handleEditTask = async (e: React.SyntheticEvent) => {
@@ -437,6 +456,8 @@ export default function ProjectDetailPage() {
       else payload.assigneeId = null // unassign
       payload.participantIds = editTaskParticipantIds
       payload.parentTaskId = editTaskParentId || null
+      // Sprint 20 US-6: 一齊 patch 需求關聯(後端支援 requirementIds 同步)
+      payload.requirementIds = editTaskReqIds
       await taskApi.update(editingTask.id, payload)
       setEditingTask(null)
       loadProject()
@@ -467,6 +488,8 @@ export default function ProjectDetailPage() {
     setEditBugSeverity(bug.severity)
     setEditBugStatus(bug.status)
     setEditBugAssignee(bug.assignee?.id || '')
+    // Sprint 20 US-6: 載入既有嘅需求關聯
+    setEditBugReqId(bug.requirementId || '')
   }
 
   const handleEditBug = async (e: React.SyntheticEvent) => {
@@ -479,7 +502,9 @@ export default function ProjectDetailPage() {
         description: editBugDesc,
         severity: editBugSeverity,
         status: editBugStatus,
-        assigneeId: editBugAssignee || null
+        assigneeId: editBugAssignee || null,
+        // Sprint 20 US-6: 同步需求關聯(null = 解除關聯)
+        requirementId: editBugReqId || null,
       })
       setEditingBug(null)
       loadProject()
@@ -754,7 +779,7 @@ export default function ProjectDetailPage() {
         <div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
             {hasAnyPermission(user, ['tasks.create']) && (
-              <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId(''); setShowAddTaskModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
+              <button onClick={() => { setNewTaskTitle(''); setNewTaskDesc(''); setNewTaskAssignee(''); setNewTaskParticipantIds([]); setNewTaskParentId(''); setNewTaskReqIds([]); setShowAddTaskModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
                 <Plus size={20} /><span>新建任務</span>
               </button>
             )}
@@ -877,7 +902,7 @@ export default function ProjectDetailPage() {
         <div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
             {hasAnyPermission(user, ['bugs.create']) && (
-              <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
+              <button onClick={() => { setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setNewBugReqId(''); setShowAddBugModal(true) }} className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center">
                 <Plus size={20} /><span>新建缺陷</span>
               </button>
             )}
@@ -1034,6 +1059,28 @@ export default function ProjectDetailPage() {
         assigneeOptions={assigneeOptions}
         participantOptions={participantOptions}
         parentTaskOptions={tasks}
+        // Sprint 20 US-6: 透過 extraFields slot 注入需求關聯(沿用 AddTaskModal 既有 API)
+        extraFields={
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">關聯需求</label>
+            <RequirementAutocomplete
+              value={newTaskReqIds}
+              onChange={(v) => setNewTaskReqIds(Array.isArray(v) ? v : [])}
+              requirements={requirements.map((r) => ({
+                id: r.id,
+                title: r.title,
+                status: r.status,
+              }))}
+              placeholder={requirements.length === 0 ? '此項目暫無需求' : '搜尋需求,可多選'}
+              multi
+              disabled={requirements.length === 0}
+              ariaLabel="選擇關聯需求"
+            />
+            {requirements.length === 0 && (
+              <p className="text-xs text-gray-500 mt-1">先在「需求」分頁建立需求,即可在此關聯</p>
+            )}
+          </div>
+        }
         submitLabel="建立任務"
         isSubmitting={isAddingTask}
         onSubmit={handleAddTask}
@@ -1046,6 +1093,24 @@ export default function ProjectDetailPage() {
         severity={newBugSeverity} setSeverity={setNewBugSeverity}
         assigneeId={newBugAssignee} setAssigneeId={setNewBugAssignee}
         assigneeOptions={assigneeOptions}
+        // Sprint 20 US-6: 注入需求關聯(單選,bug 對應 single requirementId)
+        extraFields={
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">關聯需求</label>
+            <RequirementAutocomplete
+              value={newBugReqId}
+              onChange={(v) => setNewBugReqId(typeof v === 'string' ? v : '')}
+              requirements={requirements.map((r) => ({
+                id: r.id,
+                title: r.title,
+                status: r.status,
+              }))}
+              placeholder={requirements.length === 0 ? '此項目暫無需求' : '搜尋需求(可選)'}
+              disabled={requirements.length === 0}
+              ariaLabel="選擇關聯需求"
+            />
+          </div>
+        }
         submitLabel="建立缺陷"
         isSubmitting={isAddingBug}
         onSubmit={handleAddBug}
@@ -1058,8 +1123,11 @@ export default function ProjectDetailPage() {
         editTaskParticipantIds={editTaskParticipantIds} setEditTaskParticipantIds={setEditTaskParticipantIds}
         editTaskParentId={editTaskParentId} setEditTaskParentId={setEditTaskParentId}
         editTaskStatus={editTaskStatus} setEditTaskStatus={setEditTaskStatus}
+        // Sprint 20 US-6: 將需求 state 傳到 EditTaskModal
+        editTaskReqIds={editTaskReqIds} setEditTaskReqIds={setEditTaskReqIds}
         isEditingTask={isEditingTask} handleEditTask={handleEditTask}
         tasks={tasks}
+        requirements={requirements}
         assigneeOptions={assigneeOptions} participantOptions={participantOptions}
       />
       <EditBugModal
@@ -1069,7 +1137,10 @@ export default function ProjectDetailPage() {
         editBugSeverity={editBugSeverity} setEditBugSeverity={setEditBugSeverity}
         editBugStatus={editBugStatus} setEditBugStatus={setEditBugStatus}
         editBugAssignee={editBugAssignee} setEditBugAssignee={setEditBugAssignee}
+        // Sprint 20 US-6: 將需求 state 傳到 EditBugModal
+        editBugReqId={editBugReqId} setEditBugReqId={setEditBugReqId}
         isEditingBug={isEditingBug} handleEditBug={handleEditBug}
+        requirements={requirements}
         assigneeOptions={assigneeOptions}
       />
       <WorkLogModal
@@ -1305,16 +1376,44 @@ function AgentMonitoringTab({ id }: { id: string }) {
 
 // ── Requirement Modals Component ───────────────────────────────────────
 function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, setNewReqTitle, newReqDesc, setNewReqDesc, newReqPriority, setNewReqPriority, newReqAssignee, setNewReqAssignee, isAddingReq, handleAddRequirement, editingReq, setEditingReq, editReqTitle, setEditReqTitle, editReqDesc, setEditReqDesc, editReqPriority, setEditReqPriority, editReqStatus, setEditReqStatus, isEditingReq, handleEditRequirement, projectMembers }: any) {
+  // Sprint 20 US-4: 內容過長時 submit 鈕被擋住,加全寬 toggle 同重新分配 flex 結構
+  // - 外層 flex items-start 配合 padding 4 → 短內容置中,長內容可從頂開始滾
+  // - inner: max-w-2xl md:max-w-4xl(預設)或 max-w-[95vw](全寬) + max-h-[90vh] flex flex-col
+  // - header / footer flex-shrink-0 固定;中間 <form> flex-1 + overflow-y-auto → 滾動
+  // - 兩個 modal 共享 isFullWidth state
+  const [isFullWidth, setIsFullWidth] = useState(false)
+  const widthClass = isFullWidth ? 'max-w-[95vw]' : 'max-w-2xl md:max-w-4xl'
+
+  const closeAdd = () => {
+    setShowAddReqModal(false)
+    setIsFullWidth(false)
+  }
+  const closeEdit = () => {
+    setEditingReq(null)
+    setIsFullWidth(false)
+  }
+
   return (
     <>
       {showAddReqModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 px-4 py-4 sm:py-8 overflow-y-auto">
+          <div className={`bg-white rounded-xl shadow-xl w-full ${widthClass} p-6 max-h-[90vh] flex flex-col`}>
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h2 className="text-lg font-bold text-gray-900">新建需求</h2>
-              <button onClick={() => setShowAddReqModal(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsFullWidth(v => !v)}
+                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+                  title={isFullWidth ? '切換為預設寬度' : '切換為全寬(適合長內容/表格)'}
+                  aria-label={isFullWidth ? '切換為預設寬度' : '切換為全寬'}
+                >
+                  {isFullWidth ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+                <button onClick={closeAdd} className="p-1 hover:bg-gray-100 rounded-lg" aria-label="關閉"><X size={20} /></button>
+              </div>
             </div>
-            <form onSubmit={handleAddRequirement} className="space-y-4">
+            <form id="add-requirement-form" onSubmit={handleAddRequirement} className="space-y-4 overflow-y-auto flex-1 pr-1">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">需求標題 *</label>
                 <input type="text" value={newReqTitle} onChange={(e) => setNewReqTitle(e.target.value)} className="input-field w-full" placeholder="例如：用戶登入功能" required />
@@ -1323,7 +1422,7 @@ function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, s
                 <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
                 <RichTextEditor value={newReqDesc} onChange={setNewReqDesc} placeholder="需求的詳細描述..." rows={6} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
                   <select value={newReqPriority} onChange={(e) => setNewReqPriority(e.target.value)} className="input-field w-full">
@@ -1342,23 +1441,34 @@ function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, s
                   </select>
                 </div>
               </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setShowAddReqModal(false)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isAddingReq} className="btn-primary">{isAddingReq ? '建立中...' : '建立需求'}</button>
-              </div>
             </form>
+            <div className="flex gap-3 justify-end pt-4 mt-4 border-t border-gray-100 flex-shrink-0">
+              <button type="button" onClick={closeAdd} className="btn-secondary">取消</button>
+              <button type="submit" form="add-requirement-form" disabled={isAddingReq} className="btn-primary">{isAddingReq ? '建立中...' : '建立需求'}</button>
+            </div>
           </div>
         </div>
       )}
 
       {editingReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 px-4 py-4 sm:py-8 overflow-y-auto">
+          <div className={`bg-white rounded-xl shadow-xl w-full ${widthClass} p-6 max-h-[90vh] flex flex-col`}>
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h2 className="text-lg font-bold text-gray-900">編輯需求</h2>
-              <button onClick={() => setEditingReq(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsFullWidth(v => !v)}
+                  className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+                  title={isFullWidth ? '切換為預設寬度' : '切換為全寬(適合長內容/表格)'}
+                  aria-label={isFullWidth ? '切換為預設寬度' : '切換為全寬'}
+                >
+                  {isFullWidth ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+                <button onClick={closeEdit} className="p-1 hover:bg-gray-100 rounded-lg" aria-label="關閉"><X size={20} /></button>
+              </div>
             </div>
-            <form onSubmit={handleEditRequirement} className="space-y-4">
+            <form id="edit-requirement-form" onSubmit={handleEditRequirement} className="space-y-4 overflow-y-auto flex-1 pr-1">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">需求標題 *</label>
                 <input type="text" value={editReqTitle} onChange={(e) => setEditReqTitle(e.target.value)} className="input-field w-full" required />
@@ -1367,7 +1477,7 @@ function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, s
                 <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
                 <RichTextEditor value={editReqDesc} onChange={setEditReqDesc} rows={6} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
                   <select value={editReqPriority} onChange={(e) => setEditReqPriority(e.target.value)} className="input-field w-full">
@@ -1385,11 +1495,11 @@ function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, s
                   </select>
                 </div>
               </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setEditingReq(null)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isEditingReq} className="btn-primary">{isEditingReq ? '保存中...' : '保存'}</button>
-              </div>
             </form>
+            <div className="flex gap-3 justify-end pt-4 mt-4 border-t border-gray-100 flex-shrink-0">
+              <button type="button" onClick={closeEdit} className="btn-secondary">取消</button>
+              <button type="submit" form="edit-requirement-form" disabled={isEditingReq} className="btn-primary">{isEditingReq ? '保存中...' : '保存'}</button>
+            </div>
           </div>
         </div>
       )}
@@ -1570,7 +1680,7 @@ function AgentTasksList({ projectId }: { projectId: string }) {
 //
 // Drift 風險:0 — AddTaskModal 改 field 都自動傳到 Edit
 // 行數:75 行 inline → 36 行 wrapper (-52%)
-function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTaskTitle, editTaskDesc, setEditTaskDesc, editTaskAssignee, setEditTaskAssignee, editTaskParticipantIds, setEditTaskParticipantIds, editTaskParentId, setEditTaskParentId, editTaskStatus, setEditTaskStatus, isEditingTask, handleEditTask, tasks, assigneeOptions, participantOptions }: any) {
+function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTaskTitle, editTaskDesc, setEditTaskDesc, editTaskAssignee, setEditTaskAssignee, editTaskParticipantIds, setEditTaskParticipantIds, editTaskParentId, setEditTaskParentId, editTaskStatus, setEditTaskStatus, editTaskReqIds, setEditTaskReqIds, isEditingTask, handleEditTask, tasks, requirements, assigneeOptions, participantOptions }: any) {
   // Edit 過濾掉自己(parent task options 唔可以揾返自己)
   const filteredParentOptions = (tasks || [])
     .filter((task: Task) => task.id !== editingTask?.id)
@@ -1600,18 +1710,37 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
       participantOptions={participantOptions as MemberOption[]}
       parentTaskOptions={filteredParentOptions}
       extraFields={
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-          <select
-            value={editTaskStatus}
-            onChange={(e) => setEditTaskStatus(e.target.value)}
-            className="input-field w-full"
-          >
-            <option value="pending">待處理</option>
-            <option value="in_progress">進行中</option>
-            <option value="testing">測試中</option>
-            <option value="completed">已完成</option>
-          </select>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+            <select
+              value={editTaskStatus}
+              onChange={(e) => setEditTaskStatus(e.target.value)}
+              className="input-field w-full"
+            >
+              <option value="pending">待處理</option>
+              <option value="in_progress">進行中</option>
+              <option value="testing">測試中</option>
+              <option value="completed">已完成</option>
+            </select>
+          </div>
+          {/* Sprint 20 US-6: 編輯任務時可調整關聯需求 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">關聯需求</label>
+            <RequirementAutocomplete
+              value={editTaskReqIds || []}
+              onChange={(v) => setEditTaskReqIds(Array.isArray(v) ? v : [])}
+              requirements={(requirements || []).map((r: any) => ({
+                id: r.id,
+                title: r.title,
+                status: r.status,
+              }))}
+              placeholder={(requirements || []).length === 0 ? '此項目暫無需求' : '搜尋需求,可多選'}
+              multi
+              disabled={(requirements || []).length === 0}
+              ariaLabel="編輯關聯需求"
+            />
+          </div>
         </div>
       }
       submitLabel="保存"
@@ -1622,7 +1751,7 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
 }
 
 // ── Edit Bug Modal ──────────────────────────────────────────────────────
-function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle, editBugDesc, setEditBugDesc, editBugSeverity, setEditBugSeverity, editBugStatus, setEditBugStatus, editBugAssignee, setEditBugAssignee, isEditingBug, handleEditBug, assigneeOptions }: any) {
+function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle, editBugDesc, setEditBugDesc, editBugSeverity, setEditBugSeverity, editBugStatus, setEditBugStatus, editBugAssignee, setEditBugAssignee, editBugReqId, setEditBugReqId, isEditingBug, handleEditBug, requirements, assigneeOptions }: any) {
   if (!editingBug) return null
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
@@ -1639,6 +1768,22 @@ function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
             <RichTextEditor value={editBugDesc} onChange={setEditBugDesc} rows={6} />
+          </div>
+          {/* Sprint 20 US-6: 編輯缺陷時可調整關聯需求(單選) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">關聯需求</label>
+            <RequirementAutocomplete
+              value={editBugReqId || ''}
+              onChange={(v) => setEditBugReqId(typeof v === 'string' ? v : '')}
+              requirements={(requirements || []).map((r: any) => ({
+                id: r.id,
+                title: r.title,
+                status: r.status,
+              }))}
+              placeholder={(requirements || []).length === 0 ? '此項目暫無需求' : '搜尋需求(可選)'}
+              disabled={(requirements || []).length === 0}
+              ariaLabel="編輯關聯需求"
+            />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>

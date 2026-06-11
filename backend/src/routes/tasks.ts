@@ -268,7 +268,7 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
   })
   // Update task
   .put('/:id', async ({ params, body, set, user }) => {
-    const { title, description, status, assigneeId, assigneeIds, participantIds, parentTaskId, estimatedHours } = body as {
+    const { title, description, status, assigneeId, assigneeIds, participantIds, parentTaskId, estimatedHours, requirementIds } = body as {
       title?: string
       description?: string
       status?: string
@@ -277,6 +277,8 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       participantIds?: string[]
       parentTaskId?: string | null
       estimatedHours?: number
+      // Sprint 20 US-6: 編輯任務時可一齊 patch 需求關聯
+      requirementIds?: string[]
     }
 
     const existing = await prisma.task.findUnique({ where: { id: params.id } })
@@ -320,7 +322,7 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
     if (!hasEditFields) {
       if (
         user?.role === 'developer' &&
-        (title || description || assigneeId !== undefined || assigneeIds || participantIds || parentTaskId !== undefined || estimatedHours !== undefined)
+        (title || description || assigneeId !== undefined || assigneeIds || participantIds || parentTaskId !== undefined || estimatedHours !== undefined || requirementIds !== undefined)
       ) {
         set.status = 403
         return { error: { code: 'FORBIDDEN', message: "Permission denied: developer can only update status" } }
@@ -330,6 +332,13 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
     const shouldReplaceParticipants = Array.isArray(participantIds) || Array.isArray(assigneeIds) || assigneeId !== undefined
     const normalizedParticipantIds = shouldReplaceParticipants
       ? normalizeParticipantIds(assigneeId, participantIds, assigneeIds)
+      : []
+
+    // Sprint 20 US-6: 編輯任務時可一齊 patch 需求關聯(整個替換)
+    // 與 participants 邏輯一致:傳入 array = 替換,冇傳 = 唔郁
+    const shouldReplaceRequirements = Array.isArray(requirementIds)
+    const uniqueRequirementIds = shouldReplaceRequirements
+      ? Array.from(new Set((requirementIds || []).filter(Boolean)))
       : []
 
     const task = await prisma.task.update({
@@ -344,6 +353,11 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
         participants: shouldReplaceParticipants ? {
           deleteMany: {},
           create: normalizedParticipantIds.map(userId => ({ userId }))
+        } : undefined,
+        // Sprint 20 US-6: task_requirements join table 同步(整個替換)
+        requirements: shouldReplaceRequirements ? {
+          deleteMany: {},
+          create: uniqueRequirementIds.map(rid => ({ requirementId: rid }))
         } : undefined
       },
       include: taskInclude

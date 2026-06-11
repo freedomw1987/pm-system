@@ -66,7 +66,9 @@ services:
         max-file: "3"
 
   db:
-    image: postgres:15-alpine
+    # ⚠️ 客戶機無法 docker pull,改用 install.sh 預先 load + re-tag 嘅 local image
+    # 對應 release tarball: pm-system-postgres-${VERSION}-{arch}.tar
+    image: pm-system-postgres:${VERSION:-v1.0.0}
     container_name: pm-system-db
     restart: unless-stopped
     # 唔對外暴露(內部 network only)

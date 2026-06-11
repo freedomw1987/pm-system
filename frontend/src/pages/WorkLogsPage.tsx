@@ -6,6 +6,8 @@ import type { WorkLog } from '../types'
 import * as ExcelJS from 'exceljs'
 import { hasAnyPermission, hasPermission } from '../utils/permissions'
 import ProjectAutocomplete, { type ProjectOption } from '../components/ProjectAutocomplete'
+import UserAutocomplete, { type UserOption } from '../components/UserAutocomplete'
+import DepartmentAutocomplete from '../components/DepartmentAutocomplete'
 
 interface TaskOption { id: string; title: string; requirementTitle?: string }
 interface BugOption { id: string; title: string; requirementTitle?: string }
@@ -36,7 +38,7 @@ export default function WorkLogsPage() {
   const [groupedData, setGroupedData] = useState<GroupedData[]>([])
   const [grandTotal, setGrandTotal] = useState(0)
   const [totalRecords, setTotalRecords] = useState(0)
-  const [users, setUsers] = useState<{ id: string; name: string; departmentId?: string }[]>([])
+  const [users, setUsers] = useState<UserOption[]>([])
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
   const [filteredLogs, setFilteredLogs] = useState<WorkLog[]>([])
   // Server-side stats (source of truth, ignore client-side filters for these)
@@ -108,7 +110,21 @@ export default function WorkLogsPage() {
   const loadUsers = async () => {
     try {
       const res = await userApi.list()
-      setUsers(res.data.users || [])
+      // Normalize user shape → UserOption (UserAutocomplete 攞 department.id/name)
+      // 後端 user wire 可能係 {department: {id, name}} 或 {departmentId: 'xxx'},
+      // 兩種都 handle,統一餵畀 autocomplete。
+      const raw: any[] = res.data.users || []
+      const opts: UserOption[] = raw.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        department: u.department
+          ? { id: u.department.id, name: u.department.name }
+          : u.departmentId
+            ? { id: u.departmentId, name: '' } // 只有 id 冇 name 都接受(filter 仍可運作)
+            : null,
+      }))
+      setUsers(opts)
     } catch (err) {
       console.error('Failed to load users:', err)
     }
@@ -564,32 +580,34 @@ export default function WorkLogsPage() {
           </div>
           <div className="flex-1 min-w-[150px]">
             {hasAnyPermission(user, ['worklogs.view_all']) ? (
-              <select
+              <DepartmentAutocomplete
                 value={filterDepartment}
-                onChange={(e) => setFilterDepartment(e.target.value)}
-                className="input-field text-sm w-full"
-              >
-                <option value="">全部部門</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
+                onChange={(id) => {
+                  setFilterDepartment(id)
+                  // 換部門時清空人員選擇,避免跨部門誤選
+                  setFilterUser('')
+                }}
+                departments={departments}
+                placeholder="全部部門"
+                ariaLabel="篩選部門"
+                className="w-full"
+              />
             ) : (
               <input type="text" value="我所在部門" disabled className="input-field text-sm w-full bg-gray-100" />
             )}
           </div>
           <div className="flex-1 min-w-[150px]">
             {hasAnyPermission(user, ['worklogs.view_all']) ? (
-              <select
+              <UserAutocomplete
                 value={filterUser}
-                onChange={(e) => setFilterUser(e.target.value)}
-                className="input-field text-sm w-full"
-              >
-                <option value="">全部人員</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
+                onChange={setFilterUser}
+                users={users}
+                // US-1 核心:有部門選擇時,人員只列該部門成員
+                filterByDepartmentId={filterDepartment || undefined}
+                placeholder={filterDepartment ? '選擇此部門人員' : '全部人員'}
+                ariaLabel="篩選人員"
+                className="w-full"
+              />
             ) : (
               <input type="text" value="我自己" disabled className="input-field text-sm w-full bg-gray-100" />
             )}

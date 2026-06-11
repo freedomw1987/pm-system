@@ -89,11 +89,14 @@ step "3/6 搵 $ARCH_DIR image tar"
 
 FRONTEND_TAR="$(ls pm-system-frontend-${VERSION}-${ARCH_DIR}.tar 2>/dev/null | head -1 || true)"
 BACKEND_TAR="$(ls pm-system-backend-${VERSION}-${ARCH_DIR}.tar  2>/dev/null | head -1 || true)"
+POSTGRES_TAR="$(ls pm-system-postgres-${VERSION}-${ARCH_DIR}.tar 2>/dev/null | head -1 || true)"
 
 [[ -n "$FRONTEND_TAR" ]] || fail "搵唔到 frontend tar(預期 pm-system-frontend-${VERSION}-${ARCH_DIR}.tar)"
 [[ -n "$BACKEND_TAR"  ]] || fail "搵唔到 backend tar(預期 pm-system-backend-${VERSION}-${ARCH_DIR}.tar)"
+[[ -n "$POSTGRES_TAR" ]] || fail "搵唔到 postgres tar(預期 pm-system-postgres-${VERSION}-${ARCH_DIR}.tar — release package 齊唔齊?)"
 ok "frontend tar: $FRONTEND_TAR"
 ok "backend  tar: $BACKEND_TAR"
+ok "postgres tar: $POSTGRES_TAR"
 
 # 驗 CHECKSUMS
 if [[ -f CHECKSUMS.sha256 ]]; then
@@ -110,13 +113,16 @@ fi
 step "4/6 Docker load images"
 
 if docker image inspect "pm-system-frontend:$VERSION" >/dev/null 2>&1 \
-   && docker image inspect "pm-system-backend:$VERSION"  >/dev/null 2>&1; then
+   && docker image inspect "pm-system-backend:$VERSION"  >/dev/null 2>&1 \
+   && docker image inspect "pm-system-postgres:$VERSION" >/dev/null 2>&1; then
   warn "image 已經 load 過($VERSION),skip(如果想 force re-load,先 docker rmi)"
 else
   docker load -i "$FRONTEND_TAR"
   ok "frontend loaded ($ARCH_DIR)"
   docker load -i "$BACKEND_TAR"
   ok "backend  loaded ($ARCH_DIR)"
+  docker load -i "$POSTGRES_TAR"
+  ok "postgres loaded ($ARCH_DIR)  (客戶機唔需要 docker pull,完全 offline)"
   # Docker daemon image index 嘅 sync 偶爾有 race
   sleep 1
 fi
@@ -126,6 +132,7 @@ fi
 step "→ Re-tag images: $VERSION-{arch} → $VERSION"
 docker tag "pm-system-frontend:$VERSION-${ARCH_DIR}" "pm-system-frontend:$VERSION"
 docker tag "pm-system-backend:$VERSION-${ARCH_DIR}"  "pm-system-backend:$VERSION"
+docker tag "pm-system-postgres:$VERSION-${ARCH_DIR}" "pm-system-postgres:$VERSION"
 ok "re-tag done"
 
 # 確認 image 真係 load 咗
@@ -133,6 +140,8 @@ docker image inspect "pm-system-frontend:$VERSION" >/dev/null \
   || fail "frontend image re-tag 後搵唔到($VERSION)"
 docker image inspect "pm-system-backend:$VERSION"  >/dev/null \
   || fail "backend image re-tag 後搵唔到($VERSION)"
+docker image inspect "pm-system-postgres:$VERSION"  >/dev/null \
+  || fail "postgres image re-tag 後搵唔到($VERSION)"
 
 # ── 5. 啟動 ──────────────────────────────────────────────────
 step "5/6 啟動 containers"
