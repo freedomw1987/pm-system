@@ -21,6 +21,8 @@ import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 const today = () => new Date().toISOString().split('T')[0]
 
+export const getAddMemberCandidateUserParams = () => ({ limit: -1 })
+
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -197,7 +199,7 @@ export default function ProjectDetailPage() {
   }
 
   const loadAllUsers = async () => {
-    const res = await userApi.list()
+    const res = await userApi.list(getAddMemberCandidateUserParams())
     const memberIds = new Set(project?.members?.map(m => m.user.id) || [])
     setAllUsers(res.data.users.filter((u: User) => !memberIds.has(u.id)))
   }

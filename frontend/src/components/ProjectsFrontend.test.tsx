@@ -28,6 +28,14 @@ describe('US-2.2: Project Members', () => {
   })
 })
 
+describe('Project member candidate users', () => {
+  test('add member modal loads all users instead of only first paginated page', async () => {
+    const { getAddMemberCandidateUserParams } = await import('../pages/ProjectDetailPage')
+
+    expect(getAddMemberCandidateUserParams()).toEqual({ limit: -1 })
+  })
+})
+
 describe('US-2.3: Dashboard', () => {
   test('dashboard stats are calculated correctly', () => {
     interface Project { tasks: number; bugs: number }
