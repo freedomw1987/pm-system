@@ -1323,6 +1323,12 @@ export async function streamLLMResponse(options: {
             stream: true,
             temperature: 0.3,
             messages,
+            // Qwen 3.7+ reasoning models 預設會 emit reasoning_content 唔 emit content,
+            // 對一般 chat UX 嚟講係噪音(成段 "Thinking Process: ..." 文字)。
+            // 設 false 強制熄 thinking mode,output 落返 content field。
+            // DashScope-native 一定 support;third-party proxy (e.g. uniin.cn) 視乎
+            // implementation,通常 pass-through 或 silently ignore。
+            enable_thinking: false,
             tools: TOOL_DEFINITIONS,
             tool_choice: 'auto'
           })
@@ -1356,9 +1362,13 @@ export async function streamLLMResponse(options: {
           const lines = buffer.split('\n')
           buffer = lines.pop() || ''
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const data = line.slice(6)
+          for (const rawLine of lines) {
+            // 相容兩種 SSE prefix:標準 OpenAI "data: {...}" (with space)
+            // 同 DashScope 風格 "data:{...}" (no space)。後者係 Qwen 系 proxy
+            // (e.g. openai.uniin.cn) 嘅預設格式, 唔處理就成個 stream 變 0 chunk。
+            const line = rawLine.trim()
+            if (!line.startsWith('data:')) continue
+            const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
             if (data === '[DONE]' || data === '') continue
 
             try {
@@ -1471,7 +1481,9 @@ export async function streamLLMResponse(options: {
                 model: config.model,
                 stream: true,
                 temperature: 0.3,
-                messages: cleanMessages
+                messages: cleanMessages,
+                // 同 initial call — 熄 thinking mode
+                enable_thinking: false
               })
             })
             clearTimeout(followUpTimeoutId)
@@ -1518,9 +1530,11 @@ export async function streamLLMResponse(options: {
             const lines = followUpBuffer.split('\n')
             followUpBuffer = lines.pop() || ''
 
-            for (const line of lines) {
-              if (!line.startsWith('data: ')) continue
-              const data = line.slice(6)
+            for (const rawLine of lines) {
+              // 同 initial parser — 相容 OpenAI "data: {...}" 同 DashScope "data:{...}"
+              const line = rawLine.trim()
+              if (!line.startsWith('data:')) continue
+              const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
               if (data === '[DONE]' || data === '') continue
 
               try {

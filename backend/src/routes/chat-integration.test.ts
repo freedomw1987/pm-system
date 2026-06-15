@@ -427,3 +427,114 @@ describe('streamLLMResponse (integration with mocked fetch, US-8.1/8.2)', () => 
     expect(headers.Authorization).toBeUndefined()
   })
 })
+
+// ─── Regression: SSE parser tolerance + Qwen thinking mode ──────────────────
+//
+// **Why this block exists** (Sprint 2 incident 2026-06-15):
+// Qwen 3.7 reasoning models (`qwen3.7-plus-wx8n` on uniin.cn) require
+// `enable_thinking: false` to skip emitting only `reasoning_content` and put
+// final answers in `content`.
+//
+// Separately, that proxy (and DashScope endpoints generally) emit SSE lines
+// as `data:{...}` (NO space) — OpenAI standard is `data: {...}` (with space).
+// The chat.ts parser was written for OpenAI format, so it dropped every
+// chunk → empty chat responses in production.
+//
+// These tests lock down both fixes so future refactors can't silently
+// regress. **If you add a third SSE parser, copy this test pattern.**
+
+/** Build a SSE stream using DashScope-style framing (no space after `data:`). */
+function fakeSSEResponseDashScope(chunks: Array<Record<string, any>>, withDone = true): Response {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        // Note: NO space after "data:" — this is the regression case
+        controller.enqueue(encoder.encode(`data:${JSON.stringify(chunk)}\n\n`))
+      }
+      if (withDone) {
+        controller.enqueue(encoder.encode('data:[DONE]\n\n'))
+      }
+      controller.close()
+    },
+  })
+  return new Response(body, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+describe('regression — DashScope SSE format + Qwen thinking mode', () => {
+  let originalFetch: typeof globalThis.fetch
+  let fetchCalls: Array<{ url: string; init: RequestInit | undefined }>
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    fetchCalls = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.fetch = (async (url: any, init?: RequestInit) => {
+      fetchCalls.push({ url: String(url), init })
+      // eslint-disable-next-line @typescript-eslint/no-explicit any
+      const fn = (globalThis as any).__mockFetchResponse
+      if (typeof fn === 'function') return await fn()
+      return fakeSSEResponseDashScope([
+        { id: 'chatcmpl-r1', object: 'chat.completion.chunk', created: 1, model: 'qwen3.7-plus-wx8n',
+          choices: [{ index: 0, delta: { content: '你好' }, finish_reason: null }] },
+        { id: 'chatcmpl-r1', object: 'chat.completion.chunk', created: 1, model: 'qwen3.7-plus-wx8n',
+          choices: [{ index: 0, delta: { content: '，世界' }, finish_reason: null }] },
+        { id: 'chatcmpl-r1', object: 'chat.completion.chunk', created: 1, model: 'qwen3.7-plus-wx8n',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+      ])
+    }) as typeof globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__mockFetchResponse
+  })
+
+  test('parses DashScope-style `data:{...}` (no space) — extracts content', async () => {
+    // Before the fix: parser did `if (!line.startsWith('data: ')) continue`
+    // → DashScope lines started with `data:` (no space) → ALL chunks dropped
+    // → user got 0 content even though LLM responded correctly.
+    // After the fix: parser accepts both `data: {...}` and `data:{...}`.
+    const stream = await streamLLMResponse(FAKE_BASE_OPTS)
+    const { parsed } = await readStream(stream)
+
+    // Find chunks that contain user-facing content. Should be "你好" + "，世界"
+    // from the LLM mock, then "stop" finish from source's finalize step.
+    const contentChunks = parsed
+      .map(p => p?.choices?.[0]?.delta?.content)
+      .filter((c): c is string => typeof c === 'string' && c.length > 0)
+    expect(contentChunks).toContain('你好')
+    expect(contentChunks).toContain('，世界')
+  })
+
+  test('sends `enable_thinking: false` to disable Qwen 3.7 reasoning mode', async () => {
+    // Qwen 3.7+ defaults to emitting all content in `reasoning_content` and
+    // stopping before producing visible content. `enable_thinking: false`
+    // is the official DashScope param to opt out.
+    const stream = await streamLLMResponse(FAKE_BASE_OPTS)
+    await readStream(stream)
+
+    expect(fetchCalls).toHaveLength(1)
+    const body = JSON.parse(fetchCalls[0].init?.body as string)
+    expect(body.enable_thinking).toBe(false)
+  })
+
+  test('sendData sseChunk events still use OpenAI-style `data: ` prefix on output', async () => {
+    // The INPUT parser is tolerant of both formats, but the OUTPUT (what we
+    // send to the browser) must remain OpenAI-compatible — frontend SSE
+    // clients (EventSource API) require `data: ` with space.
+    const stream = await streamLLMResponse(FAKE_BASE_OPTS)
+    const { rawText } = await readStream(stream)
+
+    const dataLines = rawText.split('\n').filter(l => l.startsWith('data:'))
+    expect(dataLines.length).toBeGreaterThan(0)
+    // Every output data: line should use the spaced form
+    for (const line of dataLines) {
+      expect(line.startsWith('data: ')).toBe(true)
+    }
+  })
+})

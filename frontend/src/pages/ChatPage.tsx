@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import api from '../utils/api'
+import { uuid } from '../utils/uuid'
 
 // Custom component to render thinking tags differently
 function ThinkingBlock({ content }: { content: string }) {
@@ -392,11 +393,11 @@ export default function ChatPage() {
     }
 
     // Add user message immediately
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content }
+    const userMsg: ChatMessage = { id: uuid(), role: 'user', content }
     setMessages(prev => [...prev, userMsg])
     setStreaming(true)
 
-    const assistantMsgId = crypto.randomUUID()
+    const assistantMsgId = uuid()
     let assistantContent = ''
     setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '' }])
 
