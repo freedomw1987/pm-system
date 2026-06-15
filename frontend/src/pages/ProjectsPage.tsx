@@ -5,9 +5,11 @@ import { projectApi, departmentApi } from '../utils/api'
 import type { Project } from '../types'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
+import FullscreenModal from '../components/FullscreenModal'
 import { hasAnyPermission } from '../utils/permissions'
 import Pagination from '../components/Pagination'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
+import { migrateDataUrlsToAttachments } from '../utils/descriptionAttachments'
 
 interface Department {
   id: string
@@ -115,8 +117,22 @@ export default function ProjectsPage() {
     e.preventDefault()
     setIsSubmitting(true)
     try {
+      // Step 1: create project 拎新 ID
       const response = await projectApi.create({ name, description, departmentId: departmentId || undefined })
-      navigate(`/projects/${response.data.project.id}`)
+      const newProjectId = response.data?.project?.id as string | undefined
+
+      // Step 2: 創建後如有 data URL 圖,upload 去 attachments + replace
+      if (newProjectId && description && description.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(description, 'project', newProjectId)
+          if (migrated !== description) {
+            await projectApi.update(newProjectId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[ProjectsPage] data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
+      navigate(`/projects/${newProjectId}`)
     } catch (err) {
       console.error('Failed to create project:', err)
     } finally {
@@ -148,9 +164,19 @@ export default function ProjectsPage() {
     if (!editingProject) return
     setIsEditing(true)
     try {
+      // 編輯模式時 RichTextEditor 有 uploadEntity,新 paste 嘅圖會直接 upload;
+      // 但 description 可能仲殘留舊 data URL,save 前 migrate 一次
+      let finalDesc = editDescription
+      if (editDescription && editDescription.includes('data:image/')) {
+        try {
+          finalDesc = await migrateDataUrlsToAttachments(editDescription, 'project', editingProject.id)
+        } catch (migErr) {
+          console.warn('[ProjectsPage] data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
       await projectApi.update(editingProject.id, {
         name: editName,
-        description: editDescription,
+        description: finalDesc,
         status: editStatus,
         departmentId: editDepartmentId || undefined
       })
@@ -347,149 +373,119 @@ export default function ProjectsPage() {
       )}
 
       {/* Create Modal Form */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">新建項目</h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  項目名稱 *
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="input-field"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  描述
-                </label>
-                <RichTextEditor
-                  value={description}
-                  onChange={setDescription}
-                  placeholder="項目的詳細描述..."
-                  rows={4}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  部門
-                </label>
-                <select
-                  value={departmentId}
-                  onChange={(e) => setDepartmentId(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="">無</option>
-                  {departments.map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn-secondary"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="btn-primary"
-                >
-                  {isSubmitting ? '創建中...' : '創建'}
-                </button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title="新建項目"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">取消</button>
+            <button type="submit" form="projects-create-form" disabled={isSubmitting} className="btn-primary">
+              {isSubmitting ? '創建中...' : '創建'}
+            </button>
+          </>
+        }
+      >
+        <form id="projects-create-form" onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">項目名稱 *</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input-field w-full"
+              required
+            />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <RichTextEditor
+              value={description}
+              onChange={setDescription}
+              placeholder="項目的詳細描述..."
+              rows={4}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">部門</label>
+            <select
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+              className="input-field w-full"
+            >
+              <option value="">無</option>
+              {departments.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* Edit Modal Form */}
-      {showEditModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">編輯項目</h2>
-            <form onSubmit={handleEdit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  項目名稱 *
-                </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="input-field"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  描述
-                </label>
-                <RichTextEditor
-                  value={editDescription}
-                  onChange={setEditDescription}
-                  placeholder="項目的詳細描述..."
-                  rows={4}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  狀態
-                </label>
-                <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="active">進行中</option>
-                  <option value="on_hold">暫停</option>
-                  <option value="completed">已完成</option>
-                  <option value="archived">已歸檔</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  部門
-                </label>
-                <select
-                  value={editDepartmentId}
-                  onChange={(e) => setEditDepartmentId(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="">無</option>
-                  {departments.map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="btn-secondary"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={isEditing}
-                  className="btn-primary"
-                >
-                  {isEditing ? '保存中...' : '保存'}
-                </button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        title="編輯項目"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowEditModal(false)} className="btn-secondary">取消</button>
+            <button type="submit" form="projects-edit-form" disabled={isEditing} className="btn-primary">
+              {isEditing ? '保存中...' : '保存'}
+            </button>
+          </>
+        }
+      >
+        <form id="projects-edit-form" onSubmit={handleEdit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">項目名稱 *</label>
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="input-field w-full"
+              required
+            />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            {/* 編輯模式已有 project ID,直接 upload 去 attachments 唔再用 data URL */}
+            <RichTextEditor
+              value={editDescription}
+              onChange={setEditDescription}
+              placeholder="項目的詳細描述..."
+              rows={4}
+              uploadEntity={editingProject?.id ? { type: 'project', id: editingProject.id } : undefined}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+            <select
+              value={editStatus}
+              onChange={(e) => setEditStatus(e.target.value)}
+              className="input-field w-full"
+            >
+              <option value="active">進行中</option>
+              <option value="on_hold">暫停</option>
+              <option value="completed">已完成</option>
+              <option value="archived">已歸檔</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">部門</label>
+            <select
+              value={editDepartmentId}
+              onChange={(e) => setEditDepartmentId(e.target.value)}
+              className="input-field w-full"
+            >
+              <option value="">無</option>
+              {departments.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        </form>
+      </FullscreenModal>
     </div>
   )
 }

@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, CheckCircle, Bug as BugIcon, AlertTriangle, Edit2, Trash2, X, Clock, Bot, Search } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Plus, CheckCircle, Bug as BugIcon, AlertTriangle, Edit2, Trash2, X, Clock, Bot, Search, Eye } from 'lucide-react'
 import { requirementApi, taskApi, bugApi, projectApi, workLogApi } from '../utils/api'
 import { hasAnyPermission } from '../utils/permissions'
 import { useAuth } from '../context/AuthContext'
 import RichTextEditor from '../components/RichTextEditor'
+import FullscreenModal from '../components/FullscreenModal'
 import ToggleMultiSelect from '../components/ToggleMultiSelect'
 import Pagination from '../components/Pagination'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
+import { migrateDataUrlsToAttachments } from '../utils/descriptionAttachments'
 import type { Requirement, Task, Bug, User } from '../types'
 
 const today = () => new Date().toISOString().split('T')[0]
 
 export default function RequirementDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [requirement, setRequirement] = useState<Requirement | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
@@ -151,9 +154,19 @@ export default function RequirementDetailPage() {
     e.preventDefault()
     setIsEditingReq(true)
     try {
+      // 編輯模式時 RichTextEditor 有 uploadEntity,新 paste 嘅圖會直接 upload;
+      // 但 description 可能仲殘留舊 data URL,save 前 migrate 一次
+      let finalDesc = editReqDesc
+      if (editReqDesc && editReqDesc.includes('data:image/')) {
+        try {
+          finalDesc = await migrateDataUrlsToAttachments(editReqDesc, 'requirement', id!)
+        } catch (migErr) {
+          console.warn('[RequirementDetailPage] requirement data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
       await requirementApi.update(id!, {
         title: editReqTitle,
-        description: editReqDesc,
+        description: finalDesc,
         status: editReqStatus,
         priority: editReqPriority,
         assigneeId: editReqAssignee || undefined
@@ -197,6 +210,18 @@ export default function RequirementDetailPage() {
       })
 
       const taskId = result.data.task?.id
+
+      // data URL 圖 migrate 去 attachments(冇 uploadEntity 嘅 paste fallback)
+      if (taskId && newTaskDesc && newTaskDesc.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(newTaskDesc, 'task', taskId)
+          if (migrated !== newTaskDesc) {
+            await taskApi.update(taskId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[RequirementDetailPage] task data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
 
       // Auto-assign to recommended agent if enabled and we have a task ID
       if (autoAssignAgent && taskId && recommendedAgent) {
@@ -298,9 +323,19 @@ export default function RequirementDetailPage() {
     if (!editingTask) return
     setIsEditingTask(true)
     try {
+      // 編輯模式時 RichTextEditor 有 uploadEntity,新 paste 嘅圖會直接 upload;
+      // 但 description 可能仲殘留舊 data URL,save 前 migrate 一次
+      let finalDesc = editTaskDesc
+      if (editTaskDesc && editTaskDesc.includes('data:image/')) {
+        try {
+          finalDesc = await migrateDataUrlsToAttachments(editTaskDesc, 'task', editingTask.id)
+        } catch (migErr) {
+          console.warn('[RequirementDetailPage] task data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
       await taskApi.update(editingTask.id, {
         title: editTaskTitle,
-        description: editTaskDesc,
+        description: finalDesc,
         status: editTaskStatus,
         assigneeId: editTaskAssignee || null,
         participantIds: editTaskParticipantIds,
@@ -380,7 +415,22 @@ export default function RequirementDetailPage() {
         requirementId: id,
         projectId: requirement?.projectId
       }
-      await bugApi.create(bugData)
+      // Step 1: create bug 拎新 ID
+      const createRes = await bugApi.create(bugData)
+      const newBugId = createRes.data?.bug?.id as string | undefined
+
+      // Step 2: data URL 圖 migrate 去 attachments(冇 uploadEntity 嘅 paste fallback)
+      if (newBugId && newBugDesc && newBugDesc.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(newBugDesc, 'bug', newBugId)
+          if (migrated !== newBugDesc) {
+            await bugApi.update(newBugId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[RequirementDetailPage] data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
+
       setShowAddBug(false)
       setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee('')
       loadData()
@@ -820,6 +870,14 @@ export default function RequirementDetailPage() {
                         <option value="resolved">已修復</option>
                         <option value="verified">已驗證</option>
                       </select>
+                      {/* Issue 2 (Sprint 21): 跳轉到詳情頁 */}
+                      <button
+                        onClick={() => navigate(`/bugs/${bug.id}`)}
+                        className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                        title="查看缺陷詳情"
+                      >
+                        <Eye size={14} />
+                      </button>
                       <button
                         onClick={() => openWorkLogModal({ type: 'bug', id: bug.id, title: bug.title })}
                         className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
@@ -853,328 +911,336 @@ export default function RequirementDetailPage() {
       )}
 
       {/* ── Edit Requirement Modal ── */}
-      {showEditReq && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">編輯需求</h2>
-              <button onClick={() => setShowEditReq(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleEditRequirement} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-                <input type="text" value={editReqTitle} onChange={(e) => setEditReqTitle(e.target.value)} className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={editReqDesc} onChange={setEditReqDesc} rows={6} />
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-                  <select value={editReqStatus} onChange={(e) => setEditReqStatus(e.target.value)} className="input-field w-full">
-                    <option value="pending">待處理</option>
-                    <option value="in_progress">進行中</option>
-                    <option value="completed">已完成</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
-                  <select value={editReqPriority} onChange={(e) => setEditReqPriority(e.target.value)} className="input-field w-full">
-                    <option value="high">優先</option>
-                    <option value="medium">中等</option>
-                    <option value="low">較低</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-                  <select value={editReqAssignee} onChange={(e) => setEditReqAssignee(e.target.value)} className="input-field w-full">
-                    <option value="">-- 不指定 --</option>
-                    {projectMembers.map(member => (
-                      <option key={member.id} value={member.id}>{member.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setShowEditReq(false)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isEditingReq} className="btn-primary">
-                  {isEditingReq ? '保存中...' : '保存'}
-                </button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={showEditReq}
+        onClose={() => setShowEditReq(false)}
+        title="編輯需求"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowEditReq(false)} className="btn-secondary">取消</button>
+            <button type="submit" form="reqdetail-edit-req-form" disabled={isEditingReq} className="btn-primary">
+              {isEditingReq ? '保存中...' : '保存'}
+            </button>
+          </>
+        }
+      >
+        <form id="reqdetail-edit-req-form" onSubmit={handleEditRequirement} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+            <input type="text" value={editReqTitle} onChange={(e) => setEditReqTitle(e.target.value)} className="input-field w-full" required />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            {/* 編輯模式已有 requirement ID,直接 upload 去 attachments 唔再用 data URL */}
+            <RichTextEditor
+              value={editReqDesc}
+              onChange={setEditReqDesc}
+              rows={6}
+              uploadEntity={{ type: 'requirement', id: id! }}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+              <select value={editReqStatus} onChange={(e) => setEditReqStatus(e.target.value)} className="input-field w-full">
+                <option value="pending">待處理</option>
+                <option value="in_progress">進行中</option>
+                <option value="completed">已完成</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">優先級</label>
+              <select value={editReqPriority} onChange={(e) => setEditReqPriority(e.target.value)} className="input-field w-full">
+                <option value="high">優先</option>
+                <option value="medium">中等</option>
+                <option value="low">較低</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+              <select value={editReqAssignee} onChange={(e) => setEditReqAssignee(e.target.value)} className="input-field w-full">
+                <option value="">-- 不指定 --</option>
+                {projectMembers.map(member => (
+                  <option key={member.id} value={member.id}>{member.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* ── Add Task Modal ── */}
-      {showAddTask && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">新建任務</h2>
-              <button onClick={() => setShowAddTask(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+      <FullscreenModal
+        open={showAddTask}
+        onClose={() => setShowAddTask(false)}
+        title="新建任務"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowAddTask(false)} className="btn-secondary">取消</button>
+            <button type="submit" form="reqdetail-add-task-form" disabled={isAddingTask} className="btn-primary">
+              {isAddingTask ? '建立中...' : '建立任務'}
+            </button>
+          </>
+        }
+      >
+        <form id="reqdetail-add-task-form" onSubmit={handleAddTask} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+            <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="input-field w-full" placeholder="輸入任務標題" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <RichTextEditor value={newTaskDesc} onChange={setNewTaskDesc} placeholder="輸入任務描述" rows={6} />
+          </div>
+
+          {/* Smart Assignment */}
+          <div className="bg-blue-50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Bot className="w-5 h-5 text-blue-600" />
+                <span className="font-medium text-gray-900">智能分配</span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoAssignAgent}
+                  onChange={(e) => {
+                    setAutoAssignAgent(e.target.checked)
+                    if (e.target.checked && recommendedAgent) {
+                      setNewTaskAssignee(recommendedAgent.id)
+                    } else if (!e.target.checked) {
+                      setNewTaskAssignee('')
+                    }
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
             </div>
-            <form onSubmit={handleAddTask} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-                <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="input-field w-full" placeholder="輸入任務標題" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={newTaskDesc} onChange={setNewTaskDesc} placeholder="輸入任務描述" rows={6} />
-              </div>
 
-              {/* Smart Assignment */}
-              <div className="bg-blue-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Bot className="w-5 h-5 text-blue-600" />
-                    <span className="font-medium text-gray-900">智能分配</span>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoAssignAgent}
-                      onChange={(e) => {
-                        setAutoAssignAgent(e.target.checked)
-                        if (e.target.checked && recommendedAgent) {
-                          setNewTaskAssignee(recommendedAgent.id)
-                        } else if (!e.target.checked) {
-                          setNewTaskAssignee('')
-                        }
-                      }}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
+            {recommendedAgent ? (
+              <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-blue-200">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-white" />
                 </div>
-
-                {recommendedAgent ? (
-                  <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-blue-200">
-                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                      <Bot className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{recommendedAgent.name}</p>
-                      <p className="text-sm text-gray-500">
-                        匹配技能：
-                        {recommendedAgent.skills.map((s) => (
-                          <span key={s} className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{s}</span>
-                        ))}
-                      </p>
-                    </div>
-                    {autoAssignAgent && (
-                      <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">將自動分配</span>
-                    )}
-                  </div>
-                ) : newTaskTitle.length >= 3 ? (
-                  <p className="text-sm text-gray-500">正在分析任務內容...</p>
-                ) : (
-                  <p className="text-sm text-gray-400">輸入任務標題以獲取推薦</p>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">{recommendedAgent.name}</p>
+                  <p className="text-sm text-gray-500">
+                    匹配技能：
+                    {recommendedAgent.skills.map((s) => (
+                      <span key={s} className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{s}</span>
+                    ))}
+                  </p>
+                </div>
+                {autoAssignAgent && (
+                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">將自動分配</span>
                 )}
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-                <select value={newTaskAssignee} onChange={(e) => setNewTaskAssignee(e.target.value)} className="input-field w-full">
-                  <option value="">-- 不指定 --</option>
-                  {assigneeOptions}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
-                <ToggleMultiSelect
-                  options={participantOptions}
-                  value={newTaskParticipantIds}
-                  onChange={setNewTaskParticipantIds}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
-                <select value={newTaskParentId} onChange={(e) => setNewTaskParentId(e.target.value)} className="input-field w-full">
-                  <option value="">无父任务</option>
-                  {tasks.map(task => (
-                    <option key={task.id} value={task.id}>{task.title}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setShowAddTask(false)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isAddingTask} className="btn-primary">
-                  {isAddingTask ? '建立中...' : '建立任務'}
-                </button>
-              </div>
-            </form>
+            ) : newTaskTitle.length >= 3 ? (
+              <p className="text-sm text-gray-500">正在分析任務內容...</p>
+            ) : (
+              <p className="text-sm text-gray-400">輸入任務標題以獲取推薦</p>
+            )}
           </div>
-        </div>
-      )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+            <select value={newTaskAssignee} onChange={(e) => setNewTaskAssignee(e.target.value)} className="input-field w-full">
+              <option value="">-- 不指定 --</option>
+              {assigneeOptions}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
+            <ToggleMultiSelect
+              options={participantOptions}
+              value={newTaskParticipantIds}
+              onChange={setNewTaskParticipantIds}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
+            <select value={newTaskParentId} onChange={(e) => setNewTaskParentId(e.target.value)} className="input-field w-full">
+              <option value="">无父任务</option>
+              {tasks.map(task => (
+                <option key={task.id} value={task.id}>{task.title}</option>
+              ))}
+            </select>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* ── Edit Task Modal ── */}
-      {editingTask && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">編輯任務</h2>
-              <button onClick={() => setEditingTask(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleEditTask} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-                <input type="text" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={editTaskDesc} onChange={setEditTaskDesc} rows={6} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-                  <select value={editTaskStatus} onChange={(e) => setEditTaskStatus(e.target.value)} className="input-field w-full">
-                    <option value="pending">待處理</option>
-                    <option value="in_progress">進行中</option>
-                    <option value="testing">測試中</option>
-                    <option value="completed">已完成</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-                  <select value={editTaskAssignee} onChange={(e) => setEditTaskAssignee(e.target.value)} className="input-field w-full">
-                    <option value="">-- 不指定 --</option>
-                    {assigneeOptions}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
-                  <ToggleMultiSelect
-                    options={participantOptions}
-                    value={editTaskParticipantIds}
-                    onChange={setEditTaskParticipantIds}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
-                  <select value={editTaskParentId} onChange={(e) => setEditTaskParentId(e.target.value)} className="input-field w-full">
-                    <option value="">无父任务</option>
-                    {tasks.filter(task => task.id !== editingTask.id).map(task => (
-                      <option key={task.id} value={task.id}>{task.title}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setEditingTask(null)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isEditingTask} className="btn-primary">
-                  {isEditingTask ? '保存中...' : '保存'}
-                </button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={!!editingTask}
+        onClose={() => setEditingTask(null)}
+        title="編輯任務"
+        footer={
+          <>
+            <button type="button" onClick={() => setEditingTask(null)} className="btn-secondary">取消</button>
+            <button type="submit" form="reqdetail-edit-task-form" disabled={isEditingTask} className="btn-primary">
+              {isEditingTask ? '保存中...' : '保存'}
+            </button>
+          </>
+        }
+      >
+        <form id="reqdetail-edit-task-form" onSubmit={handleEditTask} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+            <input type="text" value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="input-field w-full" required />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            {/* 編輯模式已有 task ID,直接 upload 去 attachments 唔再用 data URL */}
+            <RichTextEditor
+              value={editTaskDesc}
+              onChange={setEditTaskDesc}
+              rows={6}
+              uploadEntity={editingTask ? { type: 'task', id: editingTask.id } : undefined}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+              <select value={editTaskStatus} onChange={(e) => setEditTaskStatus(e.target.value)} className="input-field w-full">
+                <option value="pending">待處理</option>
+                <option value="in_progress">進行中</option>
+                <option value="testing">測試中</option>
+                <option value="completed">已完成</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+              <select value={editTaskAssignee} onChange={(e) => setEditTaskAssignee(e.target.value)} className="input-field w-full">
+                <option value="">-- 不指定 --</option>
+                {assigneeOptions}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">參與人</label>
+              <ToggleMultiSelect
+                options={participantOptions}
+                value={editTaskParticipantIds}
+                onChange={setEditTaskParticipantIds}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">父任务</label>
+              <select value={editTaskParentId} onChange={(e) => setEditTaskParentId(e.target.value)} className="input-field w-full">
+                <option value="">无父任务</option>
+                {tasks.filter(task => task.id !== editingTask?.id).map(task => (
+                  <option key={task.id} value={task.id}>{task.title}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* ── Add Bug Modal ── */}
-      {showAddBug && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">新建缺陷</h2>
-              <button onClick={() => setShowAddBug(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleAddBug} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-                <input type="text" value={newBugTitle} onChange={(e) => setNewBugTitle(e.target.value)} className="input-field w-full" placeholder="輸入缺陷標題" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={newBugDesc} onChange={setNewBugDesc} placeholder="輸入缺陷描述" rows={6} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
-                <select value={newBugSeverity} onChange={(e) => setNewBugSeverity(e.target.value)} className="input-field w-full">
-                  <option value="low">輕微</option>
-                  <option value="medium">中等</option>
-                  <option value="high">高</option>
-                  <option value="critical">嚴重</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-                <select value={newBugAssignee} onChange={(e) => setNewBugAssignee(e.target.value)} className="input-field w-full">
-                  <option value="">-- 不指定 --</option>
-                  {assigneeOptions}
-                </select>
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setShowAddBug(false)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isAddingBug} className="btn-primary">
-                  {isAddingBug ? '建立中...' : '建立缺陷'}
-                </button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={showAddBug}
+        onClose={() => setShowAddBug(false)}
+        title="新建缺陷"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowAddBug(false)} className="btn-secondary">取消</button>
+            <button type="submit" form="reqdetail-add-bug-form" disabled={isAddingBug} className="btn-primary">
+              {isAddingBug ? '建立中...' : '建立缺陷'}
+            </button>
+          </>
+        }
+      >
+        <form id="reqdetail-add-bug-form" onSubmit={handleAddBug} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+            <input type="text" value={newBugTitle} onChange={(e) => setNewBugTitle(e.target.value)} className="input-field w-full" placeholder="輸入缺陷標題" required />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            <RichTextEditor value={newBugDesc} onChange={setNewBugDesc} placeholder="輸入缺陷描述" rows={6} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
+            <select value={newBugSeverity} onChange={(e) => setNewBugSeverity(e.target.value)} className="input-field w-full">
+              <option value="low">輕微</option>
+              <option value="medium">中等</option>
+              <option value="high">高</option>
+              <option value="critical">嚴重</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+            <select value={newBugAssignee} onChange={(e) => setNewBugAssignee(e.target.value)} className="input-field w-full">
+              <option value="">-- 不指定 --</option>
+              {assigneeOptions}
+            </select>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* ── Edit Bug Modal ── */}
-      {editingBug && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">編輯缺陷</h2>
-              <button onClick={() => setEditingBug(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleEditBug} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-                <input type="text" value={editBugTitle} onChange={(e) => setEditBugTitle(e.target.value)} className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={editBugDesc} onChange={setEditBugDesc} rows={6} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-                  <select value={editBugStatus} onChange={(e) => setEditBugStatus(e.target.value)} className="input-field w-full">
-                    <option value="open">已開啟</option>
-                    <option value="in_progress">處理中</option>
-                    <option value="resolved">已修復</option>
-                    <option value="verified">已驗證</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
-                  <select value={editBugSeverity} onChange={(e) => setEditBugSeverity(e.target.value)} className="input-field w-full">
-                    <option value="low">輕微</option>
-                    <option value="medium">中等</option>
-                    <option value="high">高</option>
-                    <option value="critical">嚴重</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-                  <select value={editBugAssignee} onChange={(e) => setEditBugAssignee(e.target.value)} className="input-field w-full">
-                    <option value="">-- 不指定 --</option>
-                    {assigneeOptions}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setEditingBug(null)} className="btn-secondary">取消</button>
-                <button type="submit" disabled={isEditingBug} className="btn-primary">
-                  {isEditingBug ? '保存中...' : '保存'}
-                </button>
-              </div>
-            </form>
+      <FullscreenModal
+        open={!!editingBug}
+        onClose={() => setEditingBug(null)}
+        title="編輯缺陷"
+        footer={
+          <>
+            <button type="button" onClick={() => setEditingBug(null)} className="btn-secondary">取消</button>
+            <button type="submit" form="reqdetail-edit-bug-form" disabled={isEditingBug} className="btn-primary">
+              {isEditingBug ? '保存中...' : '保存'}
+            </button>
+          </>
+        }
+      >
+        <form id="reqdetail-edit-bug-form" onSubmit={handleEditBug} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+            <input type="text" value={editBugTitle} onChange={(e) => setEditBugTitle(e.target.value)} className="input-field w-full" required />
           </div>
-        </div>
-      )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+            {/* 編輯模式已有 bug ID,直接 upload 去 attachments 唔再用 data URL */}
+            <RichTextEditor
+              value={editBugDesc}
+              onChange={setEditBugDesc}
+              rows={6}
+              uploadEntity={editingBug ? { type: 'bug', id: editingBug.id } : undefined}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+              <select value={editBugStatus} onChange={(e) => setEditBugStatus(e.target.value)} className="input-field w-full">
+                <option value="open">已開啟</option>
+                <option value="in_progress">處理中</option>
+                <option value="resolved">已修復</option>
+                <option value="verified">已驗證</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
+              <select value={editBugSeverity} onChange={(e) => setEditBugSeverity(e.target.value)} className="input-field w-full">
+                <option value="low">輕微</option>
+                <option value="medium">中等</option>
+                <option value="high">高</option>
+                <option value="critical">嚴重</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+              <select value={editBugAssignee} onChange={(e) => setEditBugAssignee(e.target.value)} className="input-field w-full">
+                <option value="">-- 不指定 --</option>
+                {assigneeOptions}
+              </select>
+            </div>
+          </div>
+        </form>
+      </FullscreenModal>
 
       {/* ── Work Log Modal ── */}
       {showWorkLogModal && workLogTarget && (

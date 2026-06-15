@@ -1,3 +1,9 @@
+---
+id: TEST-COVERAGE
+aliases: []
+tags: []
+---
+
 # PM System — Test Coverage Report
 
 > **Status**: 2026-06-11 snapshot (Sprint 20 closure)

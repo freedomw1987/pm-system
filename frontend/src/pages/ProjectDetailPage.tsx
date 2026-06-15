@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle, Search, Clock, Maximize2, Minimize2 } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Plus, Users, FileText, CheckCircle, UserMinus, Edit2, Trash2, X, BookOpen, Paperclip, LayoutGrid, Bot, Activity, RefreshCw, AlertTriangle, Search, Clock, Maximize2, Minimize2, Eye } from 'lucide-react'
 import { projectApi, requirementApi, taskApi, bugApi, userApi, roleApi, workLogApi } from '../utils/api'
 import { hasAnyPermission } from '../utils/permissions'
 import type { Project, Requirement, User, ProjectMember, Role, Task, Bug } from '../types'
@@ -13,14 +13,19 @@ import ToggleMultiSelect from '../components/ToggleMultiSelect'
 import Pagination from '../components/Pagination'
 import AddTaskModal, { type MemberOption } from '../components/AddTaskModal'
 import AddBugModal from '../components/AddBugModal'
+import FullscreenModal from '../components/FullscreenModal'
 import RequirementAutocomplete, { type RequirementOption } from '../components/RequirementAutocomplete'
+import { migrateDataUrlsToAttachments } from '../utils/descriptionAttachments'
 import { useTaskRecommendation } from '../hooks/useTaskRecommendation'
 import { DEFAULT_PAGE_SIZE } from '../utils/pagination'
 
 const today = () => new Date().toISOString().split('T')[0]
 
+export const getAddMemberCandidateUserParams = () => ({ limit: -1 })
+
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [project, setProject] = useState<Project | null>(null)
   const [requirements, setRequirements] = useState<Requirement[]>([])
@@ -194,7 +199,7 @@ export default function ProjectDetailPage() {
   }
 
   const loadAllUsers = async () => {
-    const res = await userApi.list()
+    const res = await userApi.list(getAddMemberCandidateUserParams())
     const memberIds = new Set(project?.members?.map(m => m.user.id) || [])
     setAllUsers(res.data.users.filter((u: User) => !memberIds.has(u.id)))
   }
@@ -271,7 +276,22 @@ export default function ProjectDetailPage() {
     if (!newReqTitle.trim()) return
     setIsAddingReq(true)
     try {
-      await requirementApi.create(id!, { title: newReqTitle, description: newReqDesc, priority: newReqPriority, assigneeId: newReqAssignee || undefined })
+      // Step 1: create requirement 拎新 ID
+      const createRes = await requirementApi.create(id!, { title: newReqTitle, description: newReqDesc, priority: newReqPriority, assigneeId: newReqAssignee || undefined })
+      const newReqId = createRes.data?.requirement?.id as string | undefined
+
+      // Step 2: 創建後如有 data URL 圖,upload 去 attachments + replace
+      if (newReqId && newReqDesc && newReqDesc.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(newReqDesc, 'requirement', newReqId)
+          if (migrated !== newReqDesc) {
+            await requirementApi.update(newReqId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[ProjectDetailPage] requirement data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
+
       setShowAddReqModal(false)
       setNewReqTitle(''); setNewReqDesc(''); setNewReqPriority('medium'); setNewReqAssignee('')
       loadProject()
@@ -301,6 +321,18 @@ export default function ProjectDetailPage() {
       })
 
       const taskId = result.data.task?.id
+
+      // data URL 圖 migrate 去 attachments(冇 uploadEntity 嘅 paste fallback)
+      if (taskId && newTaskDesc && newTaskDesc.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(newTaskDesc, 'task', taskId)
+          if (migrated !== newTaskDesc) {
+            await taskApi.update(taskId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[ProjectDetailPage] task data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
 
       // Auto-assign to recommended agent if enabled and we have a task ID
       if (autoAssignAgent && taskId && recommendedAgent) {
@@ -414,7 +446,8 @@ export default function ProjectDetailPage() {
     if (!newBugTitle.trim()) return
     setIsAddingBug(true)
     try {
-      await bugApi.create({
+      // Step 1: create bug 拎新 ID
+      const createRes = await bugApi.create({
         title: newBugTitle,
         description: newBugDesc,
         severity: newBugSeverity,
@@ -423,6 +456,21 @@ export default function ProjectDetailPage() {
         // Sprint 20 US-6: 關聯需求(單選,bug.requirementId scalar)
         requirementId: newBugReqId || undefined,
       })
+      const newBugId = createRes.data?.bug?.id as string | undefined
+
+      // Step 2: 創建後如有 data URL 圖,upload 去 attachments + replace
+      // (RichTextEditor 喺冇 uploadEntity 時會將貼上嘅圖塞 data URL 入 HTML)
+      if (newBugId && newBugDesc && newBugDesc.includes('data:image/')) {
+        try {
+          const migrated = await migrateDataUrlsToAttachments(newBugDesc, 'bug', newBugId)
+          if (migrated !== newBugDesc) {
+            await bugApi.update(newBugId, { description: migrated })
+          }
+        } catch (migErr) {
+          console.warn('[ProjectDetailPage] data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
+
       setShowAddBugModal(false)
       setNewBugTitle(''); setNewBugDesc(''); setNewBugSeverity('medium'); setNewBugAssignee(''); setNewBugReqId('')
       loadProject()
@@ -451,7 +499,18 @@ export default function ProjectDetailPage() {
     if (!editingTask) return
     setIsEditingTask(true)
     try {
-      const payload: any = { title: editTaskTitle, description: editTaskDesc, status: editTaskStatus }
+      // 編輯模式時 RichTextEditor 有 uploadEntity,新 paste 嘅圖會直接 upload;
+      // 但 description 可能仲殘留舊 data URL,save 前 migrate 一次
+      let finalDesc = editTaskDesc
+      if (editTaskDesc && editTaskDesc.includes('data:image/')) {
+        try {
+          finalDesc = await migrateDataUrlsToAttachments(editTaskDesc, 'task', editingTask.id)
+        } catch (migErr) {
+          console.warn('[ProjectDetailPage] task data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
+
+      const payload: any = { title: editTaskTitle, description: finalDesc, status: editTaskStatus }
       if (editTaskAssignee) payload.assigneeId = editTaskAssignee
       else payload.assigneeId = null // unassign
       payload.participantIds = editTaskParticipantIds
@@ -540,9 +599,19 @@ export default function ProjectDetailPage() {
     if (!editingReq) return
     setIsEditingReq(true)
     try {
+      // 編輯模式時 RichTextEditor 有 uploadEntity,新 paste 嘅圖會直接 upload;
+      // 但 description 可能仲殘留舊 data URL,save 前 migrate 一次
+      let finalDesc = editReqDesc
+      if (editReqDesc && editReqDesc.includes('data:image/')) {
+        try {
+          finalDesc = await migrateDataUrlsToAttachments(editReqDesc, 'requirement', editingReq.id)
+        } catch (migErr) {
+          console.warn('[ProjectDetailPage] requirement data URL migrate 失敗,保留原 description:', migErr)
+        }
+      }
       await requirementApi.update(editingReq.id, {
         title: editReqTitle,
-        description: editReqDesc,
+        description: finalDesc,
         status: editReqStatus,
         priority: editReqPriority
       })
@@ -963,6 +1032,14 @@ export default function ProjectDetailPage() {
                         <option value="resolved">已修復</option>
                         <option value="verified">已驗證</option>
                       </select>
+                      {/* Issue 2 (Sprint 21): 跳轉到詳情頁 */}
+                      <button
+                        onClick={() => navigate(`/bugs/${bug.id}`)}
+                        className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                        title="查看缺陷詳情"
+                      >
+                        <Eye size={14} />
+                      </button>
                       <button
                         onClick={() => openWorkLogModal({ type: 'bug', id: bug.id, title: bug.title })}
                         className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
@@ -1475,7 +1552,13 @@ function RequirementModals({ showAddReqModal, setShowAddReqModal, newReqTitle, s
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                <RichTextEditor value={editReqDesc} onChange={setEditReqDesc} rows={6} />
+                {/* 編輯模式已有 requirement ID,直接 upload 去 attachments 唔再用 data URL */}
+                <RichTextEditor
+                  value={editReqDesc}
+                  onChange={setEditReqDesc}
+                  rows={6}
+                  uploadEntity={{ type: 'requirement', id: editingReq.id }}
+                />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -1701,6 +1784,8 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
       setParticipantIds={setEditTaskParticipantIds}
       parentTaskId={editTaskParentId}
       setParentTaskId={setEditTaskParentId}
+      // 編輯模式已有 task ID,直接 upload 去 attachments 唔再用 data URL
+      {...(editingTask?.id ? { uploadEntity: { type: 'task' as const, id: editingTask.id } } : {})}
       // Edit mode: 唔需要 smart-assign panel(edit task 已經有 assignee,推薦多餘)
       // 用 fixed 默認值 + setter dummy(EditTaskModal 唔用,但要 pass prop)
       autoAssignAgent={false}
@@ -1754,75 +1839,81 @@ function EditTaskModal({ editingTask, setEditingTask, editTaskTitle, setEditTask
 function EditBugModal({ editingBug, setEditingBug, editBugTitle, setEditBugTitle, editBugDesc, setEditBugDesc, editBugSeverity, setEditBugSeverity, editBugStatus, setEditBugStatus, editBugAssignee, setEditBugAssignee, editBugReqId, setEditBugReqId, isEditingBug, handleEditBug, requirements, assigneeOptions }: any) {
   if (!editingBug) return null
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">編輯缺陷</h2>
-          <button onClick={() => setEditingBug(null)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+    <FullscreenModal
+      open={!!editingBug}
+      onClose={() => setEditingBug(null)}
+      title="編輯缺陷"
+      footer={
+        <>
+          <button type="button" onClick={() => setEditingBug(null)} className="btn-secondary">取消</button>
+          <button type="submit" form="edit-bug-form" disabled={isEditingBug} className="btn-primary">
+            {isEditingBug ? '保存中...' : '保存'}
+          </button>
+        </>
+      }
+    >
+      <form id="edit-bug-form" onSubmit={handleEditBug} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
+          <input type="text" value={editBugTitle} onChange={(e) => setEditBugTitle(e.target.value)} className="input-field w-full" required />
         </div>
-        <form onSubmit={handleEditBug} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+          {/* 編輯模式已有 bug ID,直接 upload 去 attachments 唔再用 data URL */}
+          <RichTextEditor
+            value={editBugDesc}
+            onChange={setEditBugDesc}
+            rows={6}
+            uploadEntity={{ type: 'bug', id: editingBug.id }}
+          />
+        </div>
+        {/* Sprint 20 US-6: 編輯缺陷時可調整關聯需求(單選) */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">關聯需求</label>
+          <RequirementAutocomplete
+            value={editBugReqId || ''}
+            onChange={(v) => setEditBugReqId(typeof v === 'string' ? v : '')}
+            requirements={(requirements || []).map((r: any) => ({
+              id: r.id,
+              title: r.title,
+              status: r.status,
+            }))}
+            placeholder={(requirements || []).length === 0 ? '此項目暫無需求' : '搜尋需求(可選)'}
+            disabled={(requirements || []).length === 0}
+            ariaLabel="編輯關聯需求"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">標題 *</label>
-            <input type="text" value={editBugTitle} onChange={(e) => setEditBugTitle(e.target.value)} className="input-field w-full" required />
+            <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
+            <select value={editBugStatus} onChange={(e) => setEditBugStatus(e.target.value)} className="input-field w-full">
+              <option value="open">已開啟</option>
+              <option value="in_progress">處理中</option>
+              <option value="resolved">已修復</option>
+              <option value="verified">已驗證</option>
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-            <RichTextEditor value={editBugDesc} onChange={setEditBugDesc} rows={6} />
+            <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
+            <select value={editBugSeverity} onChange={(e) => setEditBugSeverity(e.target.value)} className="input-field w-full">
+              <option value="low">輕微</option>
+              <option value="medium">中等</option>
+              <option value="high">高</option>
+              <option value="critical">嚴重</option>
+            </select>
           </div>
-          {/* Sprint 20 US-6: 編輯缺陷時可調整關聯需求(單選) */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">關聯需求</label>
-            <RequirementAutocomplete
-              value={editBugReqId || ''}
-              onChange={(v) => setEditBugReqId(typeof v === 'string' ? v : '')}
-              requirements={(requirements || []).map((r: any) => ({
-                id: r.id,
-                title: r.title,
-                status: r.status,
-              }))}
-              placeholder={(requirements || []).length === 0 ? '此項目暫無需求' : '搜尋需求(可選)'}
-              disabled={(requirements || []).length === 0}
-              ariaLabel="編輯關聯需求"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
+            <select value={editBugAssignee} onChange={(e) => setEditBugAssignee(e.target.value)} className="input-field w-full">
+              <option value="">-- 不指定 --</option>
+              {assigneeOptions.map((m: MemberOption) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">狀態</label>
-              <select value={editBugStatus} onChange={(e) => setEditBugStatus(e.target.value)} className="input-field w-full">
-                <option value="open">已開啟</option>
-                <option value="in_progress">處理中</option>
-                <option value="resolved">已修復</option>
-                <option value="verified">已驗證</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">嚴重程度</label>
-              <select value={editBugSeverity} onChange={(e) => setEditBugSeverity(e.target.value)} className="input-field w-full">
-                <option value="low">輕微</option>
-                <option value="medium">中等</option>
-                <option value="high">高</option>
-                <option value="critical">嚴重</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">負責人</label>
-              <select value={editBugAssignee} onChange={(e) => setEditBugAssignee(e.target.value)} className="input-field w-full">
-                <option value="">-- 不指定 --</option>
-                {assigneeOptions.map((m: MemberOption) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-3 justify-end pt-2">
-            <button type="button" onClick={() => setEditingBug(null)} className="btn-secondary">取消</button>
-            <button type="submit" disabled={isEditingBug} className="btn-primary">
-              {isEditingBug ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      </form>
+    </FullscreenModal>
   )
 }
 
