@@ -14,8 +14,13 @@ RUN bun run build
 FROM nginx:alpine
 
 COPY --from=build /app/dist/ /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/nginx.conf
+# Template-based nginx config so the HTTP→HTTPS redirect can
+# inject the actual external HTTPS port (e.g. 8443 when the
+# host can't bind privileged 443). See docker-entrypoint.sh.
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

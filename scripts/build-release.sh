@@ -134,7 +134,7 @@ echo "→ 計 CHECKSUMS.sha256"
     pm-system-frontend-${VERSION}-amd64.tar \
     pm-system-frontend-${VERSION}-arm64.tar \
     pm-system-backend-${VERSION}-amd64.tar \
-    pm-system-backend-${VERSION}-amd64.tar \
+    pm-system-backend-${VERSION}-arm64.tar \
     pm-system-postgres-${VERSION}-amd64.tar \
     pm-system-postgres-${VERSION}-arm64.tar \
     > CHECKSUMS.sha256

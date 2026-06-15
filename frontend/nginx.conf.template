@@ -1,0 +1,90 @@
+worker_processes 1;
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+
+    upstream backend {
+        server backend:4000;
+    }
+
+    # ── HTTP :80 ──────────────────────────────────────────────
+    # 全部 redirect 去 HTTPS。冇 body、冇 cert,純粹做 upgrade。
+    # EXTERNAL_HTTPS_PORT 由 docker-entrypoint.sh 注入(預設 443)。
+    # 客戶用非標準 port (e.g. 8443) 時,redirect 會自動指去 :8443。
+    server {
+        listen 80;
+        server_name _;
+        return 301 https://$host:${EXTERNAL_HTTPS_PORT}$request_uri;
+    }
+
+    # ── HTTPS :443 ────────────────────────────────────────────
+    # 實際服務 frontend + proxy 落 backend。
+    # Cert 由 deploy/gen-cert.sh 喺 install 時產生,經 docker volume
+    # mount 入嚟(/etc/nginx/certs/)。
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name _;
+
+        ssl_certificate     /etc/nginx/certs/server.crt;
+        ssl_certificate_key /etc/nginx/certs/server.key;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+        ssl_session_cache   shared:SSL:10m;
+        ssl_session_timeout 1d;
+
+        # 客戶機係 IP-only 訪問(冇 subdomain),唔好 includeSubDomains
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Frame-Options          "SAMEORIGIN"        always;
+        add_header X-Content-Type-Options   "nosniff"           always;
+        add_header X-XSS-Protection         "1; mode=block"     always;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        client_max_body_size 50M;
+
+        # Chat streaming timeouts
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 120s;
+
+        # Disable gzip for streaming
+        gzip off;
+
+        location /api {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            # SSE/streaming - disable buffering
+            proxy_buffering off;
+            proxy_cache off;
+            client_max_body_size 50M;
+        }
+
+        location /auth {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto https;
+            client_max_body_size 50M;
+        }
+
+        location / {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}

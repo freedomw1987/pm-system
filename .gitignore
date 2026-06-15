@@ -13,3 +13,12 @@ docs/*-user-manual.html
 # PM-System client release artifacts (built by scripts/build-release.sh)
 deploy/.env
 deploy/dist/
+pm-system-release-*.tar.gz
+
+# TLS certs (generated at install time by deploy/gen-cert.sh)
+docker/certs/
+deploy/certs/
+certs/
+*.crt
+*.key
+*.pem
