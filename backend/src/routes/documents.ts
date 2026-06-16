@@ -426,6 +426,9 @@ async function processSingleFileForBatch(
   attachment?: any
   error?: string
 }> {
+  const t0 = Date.now()
+  const fileLabel = file?.name || file?.filename || 'unknown'
+  console.log(`[batch-parse] processFile start: ${fileLabel}`)
   let fileInfo: UploadedFileInfo
   try {
     fileInfo = await normalizeUploadedFile(file)
@@ -488,6 +491,8 @@ async function processSingleFileForBatch(
     }
   }
 
+  const llmT0 = Date.now()
+  console.log(`[batch-parse] LLM call start: ${fileInfo.fileName} (${isPdfFile ? 'pdf' : 'text'}, ${(fileInfo.fileSize / 1024).toFixed(1)}KB)`)
   const llmResult = await analyzeDocumentWithLLM(
     fileInfo.fileName,
     parsedText,
@@ -495,6 +500,8 @@ async function processSingleFileForBatch(
     isPdfFile ? fileInfo.mimeType : undefined,
     isPdfFile
   )
+  const llmElapsed = ((Date.now() - llmT0) / 1000).toFixed(1)
+  console.log(`[batch-parse] LLM call done in ${llmElapsed}s: ${fileInfo.fileName} ${llmResult.error ? `ERROR="${llmResult.error}"` : `OK (${llmResult.raw?.length || 0} chars)`}`)
   const llmOutput = llmResult.raw ?? ''
   if (llmResult.error) {
     return {
@@ -636,6 +643,12 @@ function safeSend(
     // (frontend 已經唔再 listening,event 丟咗就算)
     if (err?.message?.includes('Controller is already closed') ||
         err?.message?.includes('Invalid state')) {
+      // 加 log 知道係邊個 payload 撞上 closed controller — 對 debug
+      // 'upstream prematurely closed' 好有用
+      const payloadType = (typeof payload === 'object' && payload && 'type' in payload)
+        ? (payload as any).type
+        : 'unknown'
+      console.warn(`[safeSend] controller closed when sending type=${payloadType} — silent drop`)
       return  // silent — 預期行為
     }
     // 其他 error log 出嚟 + 仍然 throw
@@ -1108,13 +1121,55 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
         // workers 仲繼續完成 file processing(寫 DB / upload 等),
         // 唔好因為 frontend 唔再 listen 就 crash 個 batch。
         const send = (payload: unknown) => safeSend(controller, encoder, payload)
+
+        // Sprint 21 US-21.4 hotfix: SSE heartbeat
+        //
+        // Root cause: 喺 'start' event 同第一個 'file' event 之間有
+        // 30s+ silence(LLM call 中)。雖然 backend 仲喺度 await,
+        // 但呢段 silence 期間 nginx / browser fetch 任何一層 idle
+        // detector 都可能 close 個 socket → 出現
+        // `net::ERR_INCOMPLETE_CHUNKED_ENCODING` + nginx
+        // `upstream prematurely closed connection`。
+        //
+        // 修法: 每 10s emit 一個 SSE comment line `: heartbeat\n\n`,
+        // 對 SSE spec 嚟講係 no-op event(frontend 唔會 dispatch),
+        // 但 socket 上面持續有 bytes 流動,防止 idle timeout 同
+        // chunked-encoding 結尾 marker flush 問題。
+        let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+        const startHeartbeat = () => {
+          if (heartbeatTimer) return
+          heartbeatTimer = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`))
+            } catch (err: any) {
+              // Controller closed — 停止 heartbeat,workers 仲會用
+              // safeSend silent drop
+              if (heartbeatTimer) {
+                clearInterval(heartbeatTimer)
+                heartbeatTimer = null
+              }
+            }
+          }, 10_000)
+        }
+        const stopHeartbeat = () => {
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer)
+            heartbeatTimer = null
+          }
+        }
+
         let successful = 0
         let failed = 0
         let wikiPagesCreatedInner = 0
+        const batchStart = Date.now()
+        console.log(`[batch-parse] stream start: ${total} files, concurrency=${BATCH_CONCURRENCY}`)
 
         try {
           // 1) start 事件:總數 + 並發數 + filename list
           send({ type: 'start', total, concurrency: BATCH_CONCURRENCY, fileNames })
+
+          // 開啟 heartbeat,直至 finally
+          startHeartbeat()
 
           // 2) worker pool 並發處理
           await processBatchWithConcurrency(files, projectId, user.id, async (result, index) => {
@@ -1124,6 +1179,8 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
             } else {
               failed++
             }
+            const elapsed = ((Date.now() - batchStart) / 1000).toFixed(1)
+            console.log(`[batch-parse] file ${index + 1}/${total} done in ${elapsed}s: ${result.name} success=${result.success}${result.error ? ` error="${result.error}"` : ''}`)
             // 'result.type' 係 file extension 嗰個 string,同 SSE event type 撞名,
             // 改用 fileType alias 傳出去畀 frontend
             const { type: _ext, ...rest } = result
@@ -1131,6 +1188,8 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           })
 
           // 3) complete 事件:總結
+          const totalElapsed = ((Date.now() - batchStart) / 1000).toFixed(1)
+          console.log(`[batch-parse] all done in ${totalElapsed}s: ${successful} ok, ${failed} failed, ${wikiPagesCreatedInner} wiki pages`)
           send({
             type: 'complete',
             total,
@@ -1143,6 +1202,7 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           // 用 safeSend,避免 catch block 都 throw(可能 controller 已 closed)
           send({ type: 'error', message: err?.message || 'batch processing failed' })
         } finally {
+          stopHeartbeat()
           // controller.close() 喺 finally 一定跑 — 即使有 throw,確保
           // ReadableStream 完整 close,frontend fetch reader 嘅 done
           // 會係 true,觸發 while loop 退出
@@ -1151,7 +1211,13 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           } catch {
             // 已經 closed 嘅話 swallow 咗
           }
+          console.log(`[batch-parse] stream closed after ${((Date.now() - batchStart) / 1000).toFixed(1)}s`)
         }
+      },
+      cancel(reason) {
+        // Browser disconnect / fetch abort 嗰陣 runtime 會 call cancel
+        // log 出嚟畀我哋知真正 cause(對比 timeout / nginx close 等)
+        console.warn('[batch-parse] stream cancelled by consumer:', reason)
       }
     })
 
