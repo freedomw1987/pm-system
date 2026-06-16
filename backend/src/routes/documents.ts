@@ -23,13 +23,21 @@ const MAX_PROMPT_TEXT_LENGTH = 60_000
  *   - browser fetch throw \`upstream prematurely closed\` 之後無完整 body
  *   - 對 user: 個 file 永遠 hanging,UI 唔知 fail 咗
  *
- * 設 240s (4 分鐘):
- *   - 短過 nginx proxy_read_timeout 600s,timeout 觸發喺 nginx 之前
- *   - LLM call 通常 5-60s,4 分鐘對正常 response 已經超寬
- *   - 對大檔案 / 慢 LLM,return clean error 結果(file:success=false,error="AI timeout")
- *   - 環境變數可 override: \`LLM_TIMEOUT_MS\`
+ * 設 60s (1 分鐘):
+ *   - 短過 nginx proxy_read_timeout 600s
+ *   - LLM call 通常 5-30s,60s 已經超寬
+ *   - 對 LLM server 死 / 唔存在 model 嘅情況(真實 cause),user 1 分鐘
+ *     內就見到 error 結果,backend 寫 DB 仲可以 emit file:error event
+ *   - 短過一般 user 嘅耐心(2-3 分鐘),user 唔會 refresh 然後見到
+ *     'upstream prematurely closed'
+ *   - 環境變數可 override: \`LLM_TIMEOUT_MS\` (e.g. 180000 for slow model)
+ *
+ * Trigger scenario: \`openai/gpt-5.5\` (fake model name) 之後 — 之前
+ * 4 分鐘 timeout 都仲未返,user 28 秒就 refresh browser → controller
+ * closed → backend safeSend 永遠 silent drop error。1 分鐘 timeout
+ * 之後 backend 寫 error result,user 仲喺度等嘅 session 收到 event。
  */
-const LLM_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.LLM_TIMEOUT_MS || '240000', 10))
+const LLM_TIMEOUT_MS = Math.max(10_000, parseInt(process.env.LLM_TIMEOUT_MS || '60000', 10))
 
 /**
  * Sprint 21: 批次上傳 queue 嘅並發上限。
@@ -630,7 +638,8 @@ function safeSend(
         err?.message?.includes('Invalid state')) {
       return  // silent — 預期行為
     }
-    // 其他 error 仍然 rethrow (例如 controller.error 已經 set 等)
+    // 其他 error log 出嚟 + 仍然 throw
+    console.warn('[safeSend] non-closed-controller error:', err?.message)
     throw err
   }
 }
