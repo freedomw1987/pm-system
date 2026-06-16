@@ -52,6 +52,10 @@ http {
         # Static assets 都 disable — 但 SPA 已經 cache 喺瀏覽器,
         # static file load 少,影響微。
         keepalive_timeout 0;
+        # keepalive_requests 1: 額外保險,即使 timeout = 0,設定
+        # 每條 connection 最多 1 個 request(默認 1000),完全避免
+        # browser reuse connection 嘅 issue
+        keepalive_requests 1;
 
         ssl_certificate     /etc/nginx/certs/server.crt;
         ssl_certificate_key /etc/nginx/certs/server.key;
@@ -91,14 +95,16 @@ http {
             #
             # 對齊 \`net::ERR_INCOMPLETE_CHUNKED_ENCODING\` 嘅修法:
             # - keep-alive 會搞亂 chunked encoding 結尾 marker
-            #   nginx 喺 keep-alive socket 上面 send 結尾個 0\\r\\n\\r\\n
-            #   但瀏覽器等緊下一個 keep-alive 連線嘅 first chunk,
-            #   結果 hang 喺度,然後 throw ERR_INCOMPLETE_CHUNKED_ENCODING
-            # - 用 \`Connection: close\` 迫每個 SSE response 都係 standalone
-            #   連線,backend 寫完 controller.close() 之後 nginx 立即
-            #   emit 結尾 marker 再 close socket,瀏覽器收到完整 body
-            # - LLM call 通常 5-30s,每次重新 handshake 嘅成本 < 1ms,
-            #   對 streaming 體驗冇影響
+            # - 三重防線:
+            #   1) \`add_header Connection close always\` 強制 response
+            #      header 寫 \`Connection: close\`
+            #   2) \`proxy_hide_header Connection\` 隱藏 backend 可能 emit
+            #      嘅 keep-alive
+            #   3) \`keepalive_timeout 0\` 喺 server block 已經 disable
+            #      keep-alive socket reuse
+            # - 三個一齊做確保 nginx response 一定 close socket
+            # - 寫 \`always\` modifier 確保子 location 都覆蓋,唔會被
+            #   inheritance 影響
             proxy_buffering off;
             proxy_request_buffering off;
             proxy_cache off;
@@ -106,11 +112,12 @@ http {
             proxy_read_timeout 600s;
             proxy_send_timeout 600s;
             client_max_body_size 50M;
-            # 重要:每次 SSE response 結束立即 close connection
-            # 清空傳入嘅 Connection header,等 nginx 預設行為 emit close
-            proxy_set_header Connection "";
-            # 移除 backend 可能 emit 嘅 keep-alive
+            # 強制 response header: Connection: close
+            add_header Connection close always;
+            # 隱藏 backend 可能 emit 嘅 keep-alive
             proxy_hide_header Connection;
+            # 清空 client 傳入嘅 Connection header
+            proxy_set_header Connection "";
         }
 
         location /auth {
