@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
 import { loadRolePermissions } from '../index'
+import { resolveProjectIdentifier, listAccessibleProjectNames } from '../utils/project-resolver'
 
 const MAX_HISTORY_MESSAGES = 20
 const MAX_CONTEXT_CHARS = 20_000
@@ -361,6 +362,52 @@ async function assertProjectAccess(user: any, projectId: string) {
   return { ok: true as const, project }
 }
 
+// Sprint 21 US-21.6: accept either project ID (UUID) or project name as the
+// `projectId` argument from the AI tool call. LLMs frequently pass names
+// (e.g. "範例項目") because that's what users say in natural language.
+// After resolving, also run assertProjectAccess for membership check.
+async function resolveAndAssertProject(
+  identifier: string | null | undefined,
+  ctx: { userId: string; userRole: string; projectId?: string | null }
+) {
+  const target = (identifier || ctx.projectId || '').trim()
+  if (!target) {
+    const names = await listAccessibleProjectNames(ctx.userId, ctx.userRole)
+    return {
+      ok: false as const,
+      status: 400,
+      code: 'MISSING_PROJECT',
+      message: names.length > 0
+        ? `projectId / projectName 不可為空。可用的項目: ${names.join('、')}`
+        : 'projectId / projectName 不可為空,您尚未加入任何項目。'
+    }
+  }
+  const resolved = await resolveProjectIdentifier(target, {
+    userId: ctx.userId,
+    userRole: ctx.userRole
+  })
+  if (!resolved.ok) {
+    // Augment error with project name suggestions
+    const names = await listAccessibleProjectNames(ctx.userId, ctx.userRole)
+    return {
+      ok: false as const,
+      status: resolved.status,
+      code: resolved.code,
+      message: names.length > 0
+        ? `${resolved.message} 可用的項目: ${names.join('、')}`
+        : resolved.message
+    }
+  }
+  const access = await assertProjectAccess(
+    { id: ctx.userId, role: ctx.userRole },
+    resolved.project.id
+  )
+  if (!access.ok) {
+    return { ok: false as const, status: access.status, code: access.code, message: access.message }
+  }
+  return { ok: true as const, project: access.project, resolvedBy: resolved.resolvedBy }
+}
+
 async function findOwnedSession(sessionId: string, userId: string) {
   return prisma.chatSession.findFirst({
     where: { id: sessionId, userId },
@@ -545,7 +592,7 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'get_project_stats',
-      description: '取得項目的統計數據，用於生成圖表。當用戶詢問「統計」「圖表」「Chart」「分析」「進度報告」時使用。',
+      description: '取得項目的統計數據,用於生成圖表。當用戶詢問「統計」「圖表」「Chart」「分析」「進度報告」「項目進度」時使用。Sprint 21 US-21.6: projectId 參數可接受項目 ID (UUID) 或項目名稱(例如「範例項目」),會自動 resolve 到對應項目。',
       parameters: {
         type: 'object',
         properties: {
@@ -558,7 +605,7 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'search_wiki',
-      description: '使用關鍵字搜尋當前項目的 Wiki 知識庫，回傳最相關的頁面標題、標籤、內容片段與更新時間。當用戶詢問 Wiki、文件、知識庫、search、查找某主題時使用。回傳包含 metadata.{requested, matched, returned, totalAvailable, hasMore}，當 hasMore=true 時應主動告知用戶「共 X 篇可查,已返回 M 篇」並建議縮小關鍵字。',
+      description: '使用關鍵字搜尋 Wiki 知識庫,回傳最相關的頁面標題、標籤、內容片段與更新時間。當用戶詢問 Wiki、文件、知識庫、search、查找某主題時使用。回傳包含 metadata.{requested, matched, returned, totalAvailable, hasMore},當 hasMore=true 時應主動告知用戶「共 X 篇可查,已返回 10 篇」並建議縮小關鍵字。Sprint 21 US-21.6: projectId 可接受 ID 或名稱;留空時跨項目搜尋(US-21.5)。',
       parameters: {
         type: 'object',
         properties: {
@@ -819,19 +866,17 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
       // ── Project Stats ──
       case 'get_project_stats': {
         const { projectId } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
-
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
+        const project = resolved.project
 
         // Get all stats
         const [requirements, tasks, bugs, wikiPages, members] = await Promise.all([
-          prisma.requirement.findMany({ where: { projectId: effectiveProjectId } }),
-          prisma.task.findMany({ where: { projectId: effectiveProjectId } }),
-          prisma.bug.findMany({ where: { projectId: effectiveProjectId } }),
-          prisma.wikiPage.findMany({ where: { projectId: effectiveProjectId }, select: { id: true, tags: true } }),
-          prisma.projectMember.findMany({ where: { projectId: effectiveProjectId } })
+          prisma.requirement.findMany({ where: { projectId: project.id } }),
+          prisma.task.findMany({ where: { projectId: project.id } }),
+          prisma.bug.findMany({ where: { projectId: project.id } }),
+          prisma.wikiPage.findMany({ where: { projectId: project.id }, select: { id: true, tags: true } }),
+          prisma.projectMember.findMany({ where: { projectId: project.id } })
         ])
 
         // Count by status
@@ -852,32 +897,31 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
         const bugResolved = bugByStatus.resolved + bugByStatus.verified
 
         return {
-          project: access.project,
+          project,
           requirements: { total: reqTotal, ...reqByStatus, completionRate: reqTotal ? Math.round(reqDone / reqTotal * 100) : 0 },
           tasks: { total: taskTotal, ...taskByStatus, completionRate: taskTotal ? Math.round(taskDone / taskTotal * 100) : 0 },
           bugs: { total: bugTotal, ...bugByStatus, resolutionRate: bugTotal ? Math.round(bugResolved / bugTotal * 100) : 0 },
           wikiPages: wikiPages.length,
           members: members.length,
-          message: `項目統計：${reqTotal} 個需求，${taskTotal} 個任務，${bugTotal} 個缺陷`
+          message: `項目「${project.name}」統計:${reqTotal} 個需求,${taskTotal} 個任務,${bugTotal} 個缺陷`
         }
       }
 
       // ── Wiki ──
       case 'search_wiki': {
         const { projectId, query, limit } = args
-        const effectiveProjectId = projectId || ctx.projectId
         const trimmedQuery = typeof query === 'string' ? query.trim() : ''
 
         if (!trimmedQuery) return { error: 'query is required — 請提供要搜尋的 Wiki 關鍵字' }
 
-        // Sprint 21 US-21.5: cross-project query. If no project context
-        // is given, search across all projects the user is a member of
-        // (admin → all projects). Merge results, sort by score, and cap
-        // at `take` total. If user has memberships, prefer current
-        // project first; admin gets all.
+        // Sprint 21 US-21.6: accept project ID or project name
+        // Sprint 21 US-21.5: cross-project query when no project context
         let searchProjectIds: string[] = []
-        if (effectiveProjectId) {
-          searchProjectIds = [effectiveProjectId]
+        if (projectId || ctx.projectId) {
+          // Specific project requested — resolve name or ID
+          const resolved = await resolveAndAssertProject(projectId, ctx)
+          if (!resolved.ok) return { error: resolved.message }
+          searchProjectIds = [resolved.project.id]
         } else if (ctx.userRole === 'admin') {
           // admin: search all projects
           const allProjects = await prisma.project.findMany({ select: { id: true } })
@@ -962,13 +1006,10 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
       // ── Requirements ──
       case 'list_requirements': {
         const { projectId } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
-
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
         const requirements = await prisma.requirement.findMany({
-          where: { projectId },
+          where: { projectId: resolved.project.id },
           include: {
             createdBy: { select: { id: true, name: true } },
             _count: { select: { tasks: true } }
@@ -994,10 +1035,9 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 
       case 'create_requirement': {
         const { projectId, title, description, priority } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId || !title) return { error: 'projectId and title are required — 請先選擇一個項目或在對話中指定項目 ID' }
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        if (!title) return { error: 'title is required — 請提供需求標題' }
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
 
         const canCreate = ctx.userPermissions.includes('requirements.create') ||
           ctx.userRole === 'admin' || ctx.userRole === 'pm'
@@ -1005,7 +1045,7 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 
         const requirement = await prisma.requirement.create({
           data: {
-            projectId: effectiveProjectId, title, description,
+            projectId: resolved.project.id, title, description,
             priority: priority || 'medium',
             createdById: ctx.userId
           },
@@ -1059,12 +1099,10 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
       // ── Tasks ──
       case 'list_tasks': {
         const { projectId, status } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
 
-        const where: any = { projectId: effectiveProjectId }
+        const where: any = { projectId: resolved.project.id }
         if (status) where.status = status
 
         const tasks = await prisma.task.findMany({
@@ -1095,10 +1133,9 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 
       case 'create_task': {
         const { projectId, title, description, assigneeId, requirementIds, estimatedHours } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId || !title) return { error: 'projectId and title are required — 請先選擇一個項目或在對話中指定項目 ID' }
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        if (!title) return { error: 'title is required — 請提供任務標題' }
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
 
         const canCreate = ctx.userPermissions.includes('tasks.create') ||
           ctx.userRole === 'admin' || ctx.userRole === 'tech_lead'
@@ -1106,9 +1143,9 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 
         const task = await prisma.task.create({
           data: {
-            projectId: effectiveProjectId, title, description, assigneeId, estimatedHours,
+            projectId: resolved.project.id, title, description, assigneeId, estimatedHours,
             requirements: requirementIds ? {
-              create: requirementIds.map(rid => ({ requirementId: rid }))
+              create: requirementIds.map((rid: string) => ({ requirementId: rid }))
             } : undefined
           },
           include: {
@@ -1167,12 +1204,10 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
       // ── Bugs ──
       case 'list_bugs': {
         const { projectId, status } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
 
-        const where: any = { projectId: effectiveProjectId }
+        const where: any = { projectId: resolved.project.id }
         if (status) where.status = status
 
         const bugs = await prisma.bug.findMany({
@@ -1202,10 +1237,9 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 
       case 'create_bug': {
         const { projectId, title, description, severity, taskId, requirementId } = args
-        const effectiveProjectId = projectId || ctx.projectId
-        if (!effectiveProjectId || !title) return { error: 'projectId and title are required — 請先選擇一個項目或在對話中指定項目 ID' }
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        if (!title) return { error: 'title is required — 請提供缺陷標題' }
+        const resolved = await resolveAndAssertProject(projectId, ctx)
+        if (!resolved.ok) return { error: resolved.message }
 
         const canCreate = ctx.userPermissions.includes('bugs.create') ||
           ctx.userRole === 'admin' || ctx.userRole === 'tester'
@@ -1213,7 +1247,7 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
 
         const bug = await prisma.bug.create({
           data: {
-            projectId: effectiveProjectId, title, description, severity: severity || 'medium',
+            projectId: resolved.project.id, title, description, severity: severity || 'medium',
             taskId, requirementId, reporterId: ctx.userId
           },
           include: {
