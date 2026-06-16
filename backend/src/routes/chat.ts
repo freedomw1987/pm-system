@@ -4,7 +4,10 @@ import { loadRolePermissions } from '../index'
 
 const MAX_HISTORY_MESSAGES = 20
 const MAX_CONTEXT_CHARS = 20_000
-const MAX_WIKI_PAGES = 5
+// Sprint 21 US-21.4: bumped from 5 → 10 so the LLM has more wiki context
+// when answering questions. Tool-call results are still capped at
+// MAX_WIKI_TOOL_RESULTS (10) so the user-facing limit is unchanged.
+const MAX_WIKI_PAGES = 10
 const MAX_WIKI_TOOL_RESULTS = 10
 const DEFAULT_WIKI_TOOL_RESULTS = 5
 
@@ -110,12 +113,25 @@ function scoreWikiPage(page: { title: string; content: string; tags: string[] },
 
 type WikiSearchResult = {
   id: string
+  projectId: string
   title: string
   content: string
   tags: string[]
   updatedAt: Date
   score: number
   snippet: string
+}
+
+// Sprint 21 US-21.4: search results now carry metadata so the LLM (and the
+// user-facing UI banner) can tell when more results were available than we
+// returned. Tool description & system prompt updated to surface this.
+type WikiSearchResponse = {
+  results: WikiSearchResult[]
+  requested: number      // user-requested limit (post-clamp)
+  matched: number        // total candidates that scored > 0 (BEFORE limit)
+  returned: number       // results.length (after limit)
+  totalAvailable: number // all pages in the project matching the WHERE
+  hasMore: boolean       // matched > returned
 }
 
 function escapeRegExp(value: string) {
@@ -151,13 +167,29 @@ function buildWikiSnippet(content: string, terms: string[], maxLength = 700) {
   return `${prefix}${normalizedContent.slice(start, end)}${suffix}`
 }
 
-async function searchWikiPages(projectId: string, query: string, limit = DEFAULT_WIKI_TOOL_RESULTS): Promise<WikiSearchResult[]> {
+async function searchWikiPages(
+  projectId: string,
+  query: string,
+  limit = DEFAULT_WIKI_TOOL_RESULTS
+): Promise<WikiSearchResponse> {
   const terms = normalizeSearchTerms(query)
   const take = clampLimit(limit, DEFAULT_WIKI_TOOL_RESULTS, MAX_WIKI_TOOL_RESULTS)
 
-  if (terms.length === 0) return []
+  if (terms.length === 0) {
+    return {
+      results: [],
+      requested: take,
+      matched: 0,
+      returned: 0,
+      totalAvailable: 0,
+      hasMore: false
+    }
+  }
 
-  const pages = await prisma.wikiPage.findMany({
+  // Sprint 21 US-21.4: fetch all candidates (no take here) so we can report
+  // `matched` and `totalAvailable` honestly. Cap at 500 to prevent OOM on
+  // pathological projects.
+  const allCandidates = await prisma.wikiPage.findMany({
     where: {
       projectId,
       OR: terms.flatMap(term => [
@@ -166,20 +198,35 @@ async function searchWikiPages(projectId: string, query: string, limit = DEFAULT
         { tags: { has: term } }
       ])
     } as any,
-    select: { id: true, title: true, content: true, tags: true, updatedAt: true },
+    select: { id: true, projectId: true, title: true, content: true, tags: true, updatedAt: true },
     orderBy: { updatedAt: 'desc' },
-    take: Math.max(30, take * 4)
+    take: 500
   })
 
-  return pages
+  const totalAvailable = allCandidates.length
+
+  const scored = allCandidates
     .map(page => ({
       ...page,
       score: scoreWikiPage(page, terms),
       snippet: buildWikiSnippet(page.content, terms)
     }))
-    .filter(page => page.score > 0)
+
+  const matched = scored.filter(p => p.score > 0).length
+
+  const results = scored
+    .filter(p => p.score > 0)
     .sort((a, b) => b.score - a.score || b.updatedAt.getTime() - a.updatedAt.getTime())
     .slice(0, take)
+
+  return {
+    results,
+    requested: take,
+    matched,
+    returned: results.length,
+    totalAvailable,
+    hasMore: matched > results.length
+  }
 }
 
 export function sseChunk({ id, model, content, finishReason = null }: SSEEmitOptions) {
@@ -511,7 +558,7 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'search_wiki',
-      description: '使用關鍵字搜尋當前項目的 Wiki 知識庫，回傳最相關的頁面標題、標籤、內容片段與更新時間。當用戶詢問 Wiki、文件、知識庫、search、查找某主題時使用。',
+      description: '使用關鍵字搜尋當前項目的 Wiki 知識庫，回傳最相關的頁面標題、標籤、內容片段與更新時間。當用戶詢問 Wiki、文件、知識庫、search、查找某主題時使用。回傳包含 metadata.{requested, matched, returned, totalAvailable, hasMore}，當 hasMore=true 時應主動告知用戶「共 X 篇可查,已返回 M 篇」並建議縮小關鍵字。',
       parameters: {
         type: 'object',
         properties: {
@@ -821,30 +868,95 @@ async function executeTool(toolName: string, args: Record<string, any>, ctx: Too
         const effectiveProjectId = projectId || ctx.projectId
         const trimmedQuery = typeof query === 'string' ? query.trim() : ''
 
-        if (!effectiveProjectId) return { error: 'projectId is required — 請先選擇一個項目或在對話中指定項目 ID' }
         if (!trimmedQuery) return { error: 'query is required — 請提供要搜尋的 Wiki 關鍵字' }
 
-        const access = await assertProjectAccess({ id: ctx.userId, role: ctx.userRole }, effectiveProjectId)
-        if (!access.ok) return { error: access.message }
+        // Sprint 21 US-21.5: cross-project query. If no project context
+        // is given, search across all projects the user is a member of
+        // (admin → all projects). Merge results, sort by score, and cap
+        // at `take` total. If user has memberships, prefer current
+        // project first; admin gets all.
+        let searchProjectIds: string[] = []
+        if (effectiveProjectId) {
+          searchProjectIds = [effectiveProjectId]
+        } else if (ctx.userRole === 'admin') {
+          // admin: search all projects
+          const allProjects = await prisma.project.findMany({ select: { id: true } })
+          searchProjectIds = allProjects.map(p => p.id)
+        } else {
+          // non-admin: search all member projects
+          const memberships = await prisma.projectMember.findMany({
+            where: { userId: ctx.userId },
+            select: { projectId: true }
+          })
+          searchProjectIds = memberships.map(m => m.projectId)
+        }
 
-        const results = await searchWikiPages(effectiveProjectId, trimmedQuery, limit)
+        if (searchProjectIds.length === 0) {
+          return {
+            error: '你尚未加入任何項目,無法搜尋 Wiki。請聯絡項目管理員加入項目,或直接選擇一個項目。',
+            query: trimmedQuery,
+            results: [],
+            metadata: { requested: 0, matched: 0, returned: 0, totalAvailable: 0, hasMore: false }
+          }
+        }
 
-        return {
+        // Run search for each project in parallel, then merge by score.
+        const perProjectResponses = await Promise.all(
+          searchProjectIds.map(pid => searchWikiPages(pid, trimmedQuery, limit))
+        )
+
+        // Merge: flatten results, sort by score, take top `limit`.
+        const allResults = perProjectResponses.flatMap(r => r.results)
+        const totalMatched = perProjectResponses.reduce((sum, r) => sum + r.matched, 0)
+        const totalAvailable = perProjectResponses.reduce((sum, r) => sum + r.totalAvailable, 0)
+        const requested = clampLimit(limit, DEFAULT_WIKI_TOOL_RESULTS, MAX_WIKI_TOOL_RESULTS)
+
+        const merged = allResults
+          .sort((a, b) => b.score - a.score || b.updatedAt.getTime() - a.updatedAt.getTime())
+          .slice(0, requested)
+
+        // Look up project name for each result
+        const projectNames = new Map<string, string>()
+        if (searchProjectIds.length > 1) {
+          const projects = await prisma.project.findMany({
+            where: { id: { in: searchProjectIds } },
+            select: { id: true, name: true }
+          })
+          for (const p of projects) projectNames.set(p.id, p.name)
+        }
+
+        const isCrossProject = searchProjectIds.length > 1
+        const response = {
           query: trimmedQuery,
-          project: access.project,
-          count: results.length,
-          results: results.map(page => ({
+          results: merged.map(page => ({
             id: page.id,
             title: page.title,
             tags: page.tags || [],
             score: page.score,
             snippet: page.snippet,
-            updatedAt: page.updatedAt
+            updatedAt: page.updatedAt,
+            projectId: (page as any).projectId,
+            projectName: projectNames.get((page as any).projectId) || null
           })),
-          message: results.length > 0
-            ? `找到 ${results.length} 篇相關 Wiki 頁面`
+          metadata: {
+            requested,
+            matched: totalMatched,
+            returned: merged.length,
+            totalAvailable,
+            hasMore: totalMatched > merged.length,
+            crossProject: isCrossProject,
+            searchedProjects: searchProjectIds.length
+          },
+          message: isCrossProject
+            ? `跨項目搜尋了 ${searchProjectIds.length} 個項目,${totalMatched > merged.length ? `找到 ${totalMatched} 篇,已返回 ${merged.length} 篇(共 ${totalAvailable} 篇可查)` : `找到 ${merged.length} 篇相關 Wiki 頁面`}`
+            : totalMatched > merged.length
+            ? `找到 ${totalMatched} 篇相關 Wiki 頁面,已返回 ${merged.length} 篇(共 ${totalAvailable} 篇可查)。如需其他結果請縮小搜尋範圍。`
+            : merged.length > 0
+            ? `找到 ${merged.length} 篇相關 Wiki 頁面`
             : `找不到包含「${trimmedQuery}」的 Wiki 頁面`
         }
+
+        return response
       }
 
       // ── Requirements ──
@@ -1426,7 +1538,14 @@ export async function streamLLMResponse(options: {
             // For search_wiki, always show the file names to user
             if (tc.function.name === 'search_wiki' && result?.results && Array.isArray(result.results)) {
               const titles = result.results.map((r: any) => r.title || '未命名').join('\n  ')
-              sendChunk(`\n\n📄 找到 ${result.count} 篇相關文件：\n  ${titles}\n\n`)
+              const meta = result.metadata
+              const projectLabel = meta?.crossProject
+                ? `\n🌐 跨項目搜尋 (${meta.searchedProjects} 個項目)`
+                : ''
+              const header = meta?.hasMore
+                ? `${projectLabel}\n\n📄 找到 ${meta.matched} 篇相關文件,已返回 ${meta.returned} 篇(共 ${meta.totalAvailable} 篇可查):\n  ${titles}\n\n💡 如需其他結果,請嘗試更具體的關鍵字。\n\n`
+                : `${projectLabel}\n\n📄 找到 ${meta?.returned ?? 0} 篇相關文件:\n  ${titles}\n\n`
+              sendChunk(header)
             } else if (tc.function.name === 'search_wiki' && result?.error) {
               // Show error message
               sendChunk(`\n\n⚠️ ${result.error}\n\n`)
