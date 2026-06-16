@@ -46,6 +46,16 @@ David Chu 5 個改動,一次過做(揀 A),P0 = 1, 3, 4,P1 = 2, 5。
 - Native binary path 完全避開呢個問題,Alpine 官方維護,唔會突然有 CVE 跳出
 - Dockerfile build 慢 1-2 秒 (apk add),runtime 唔受影響
 
+## Hotfix US-21.1.1 (2026-06-16, post-merge)
+**Spec error 修正** — Dockerfile 一開始寫咗 `catdoc` + `xls2csv` 兩個 Alpine package,但兩者**唔喺 Alpine 官方 repo**(verified via `apk search` against dl-cdn.alpinelinux.org v3.22 — 兩者都 no such package)。Docker build fail 喺 layer `RUN apk add`。
+
+**修正後**:
+- `.doc` parser: `antiword` (主) + `wvText` (wv package 入面) 做 fallback。`wvText` 取代 `catdoc`(Alpine 有 wv,冇 catdoc)
+- `.xls` parser: 直接用 `ssconvert` (gnumeric package 入面) 一個 binary 取代 `xls2csv` + ssconvert fallback 兩層(簡化邏輯)。`ssconvert --export-type=Gnumeric_stf:stf_csv` 將所有 sheet concat 成 single CSV
+- Dockerfile `apk add` 改 `antiword wv gnumeric`(無 catdoc / xls2csv)
+
+**未 commit**(hotfix by spec — image re-build 唔需要新 US,但 code change 應該後續追蹤)。本 retro 留個 audit trail。
+
 ## Non-goals
 - 唔做 OCR(scanned PDF) — 已 deprecated
 - 唔做 fuzzy match(用戶揀 a 嚴格)

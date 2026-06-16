@@ -5,9 +5,13 @@
 FROM oven/bun:1-alpine AS builder
 
 # poppler-utils needed for PDF → image conversion in routes
-# Sprint 21: antiword (legacy .doc) + xls2csv (legacy .xls) + catdoc fallback
-#            Pure native binaries, zero CVE (vs SheetJS xlsx@0.18.5 which has Prototype Pollution + ReDoS — see REGRESSION-GUARD.md)
-RUN apk add --no-cache poppler-utils antiword xls2csv catdoc
+# Sprint 21 (hotfix US-21.1.1): antiword (legacy .doc) + wv (AbiWord .doc fallback) +
+#                                gnumeric (provides ssconvert for legacy .xls).
+#            Note: catdoc + xls2csv are NOT in Alpine official repo (verified
+#            2026-06-16 against dl-cdn.alpinelinux.org v3.22). Pure native binaries,
+#            zero CVE (vs SheetJS xlsx@0.18.5 which has Prototype Pollution +
+#            ReDoS — see REGRESSION-GUARD.md).
+RUN apk add --no-cache poppler-utils antiword wv gnumeric
 
 WORKDIR /app
 
@@ -39,8 +43,10 @@ RUN DATABASE_URL=postgresql://build:build@localhost:5432/build bunx prisma gener
 FROM oven/bun:1-alpine
 
 # poppler-utils still needed at runtime (PDF conversion in request handlers)
-# Sprint 21: antiword + xls2csv + catdoc also needed for legacy Office file parsing
-RUN apk add --no-cache poppler-utils antiword xls2csv catdoc
+# Sprint 21 (hotfix US-21.1.1): antiword + wv + gnumeric also needed for legacy
+# Office file parsing. catdoc + xls2csv were specified originally but are not
+# in Alpine official repo.
+RUN apk add --no-cache poppler-utils antiword wv gnumeric
 
 WORKDIR /app
 

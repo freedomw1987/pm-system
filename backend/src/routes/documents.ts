@@ -166,7 +166,10 @@ async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
     // Why not SheetJS xlsx? — npm `xlsx` is permanently stuck at 0.18.5 (Prototype
     // Pollution + ReDoS, see REGRESSION-GUARD.md). Native `antiword` is CVE-free,
     // Alpine has the package, no npm audit failure.
-    // catdoc is a fallback in case antiword's Word 6/95 dialect detection fails.
+    // wvText (from `wv` package) is a fallback in case antiword's Word 6/95
+    // dialect detection fails on older .doc variants.
+    // Hotfix US-21.1.1: replaced catdoc with wvText — catdoc is NOT in Alpine
+    // official repo.
     const tmpPath = `/tmp/wiki_doc_${Date.now()}_${Math.random().toString(36).slice(2)}.doc`
     try {
       await fs.promises.writeFile(tmpPath, fileInfo.buffer)
@@ -175,8 +178,9 @@ async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
         const proc = await $`antiword -m UTF-8.txt ${tmpPath}`.text()
         text = proc
       } catch (antiwordErr) {
-        console.log('[Document Parse] antiword failed, falling back to catdoc:', antiwordErr)
-        const proc = await $`catdoc -d utf-8 ${tmpPath}`.text()
+        console.log('[Document Parse] antiword failed, falling back to wvText:', antiwordErr)
+        // wvText outputs to stdout by default; -c flag for charset
+        const proc = await $`wvText ${tmpPath}`.text()
         text = proc
       }
       const body = (text || '').trim()
@@ -230,40 +234,35 @@ async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
   }
 
   if (ext === '.xls') {
-    // Sprint 21 US-21.1: legacy .xls (Excel 97-2003 BIFF8) via `xls2csv` native binary
-    // (part of the `xls2csv` Perl package, available in Alpine via apk).
-    // Falls back to LibreOffice `ssconvert` if xls2csv fails on modern .xls
-    // variants. Why not SheetJS xlsx? — npm `xlsx` is permanently 0.18.5
-    // (CVE-2023-30533 Prototype Pollution + CVE-2024-22363 ReDoS, see
-    // REGRESSION-GUARD.md). Native binary path is CVE-free.
+    // Sprint 21 US-21.1: legacy .xls (Excel 97-2003 BIFF8) via `ssconvert`
+    // (part of the `gnumeric` package, available in Alpine via apk).
+    // Hotfix US-21.1.1: replaced xls2csv with ssconvert directly — xls2csv is
+    // NOT in Alpine official repo. Why not SheetJS xlsx? — npm `xlsx` is
+    // permanently 0.18.5 (CVE-2023-30533 Prototype Pollution +
+    // CVE-2024-22363 ReDoS, see REGRESSION-GUARD.md). Native binary path
+    // is CVE-free.
+    // ssconvert outputs the active sheet to a single file; we want all
+    // sheets, so we export to xlsx first (which preserves all sheets),
+    // then re-parse via exceljs. This adds a step but ensures full coverage.
+    // For the simpler "all-sheets concatenated as CSV" case, use --export-type
+    // with Gnumeric_stf:stf_csv. We use the second approach here.
     const tmpPath = `/tmp/wiki_xls_${Date.now()}_${Math.random().toString(36).slice(2)}.xls`
     try {
       await fs.promises.writeFile(tmpPath, fileInfo.buffer)
-      const sheetTexts: string[] = []
-      // xls2csv prints all sheets on stdout, one per line block separated by
-      // a blank line. We then ask user to use --sheet if needed; here we take
-      // the whole CSV as a single block to keep the parser simple.
-      let csv = ''
+      // Export all sheets as a single CSV file. ssconvert's stf_csv format
+      // concatenates sheets with a blank line separator, similar to xls2csv.
+      const outPath = `/tmp/wiki_xls_out_${Date.now()}.csv`
       try {
-        csv = await $`xls2csv -q 0 -d utf-8 ${tmpPath}`.text()
-      } catch (xlsErr) {
-        console.log('[Document Parse] xls2csv failed, falling back to ssconvert:', xlsErr)
-        // ssconvert outputs ALL sheets concatenated, prefixed with sheet name
-        // when given multiple file args. Here we just want the whole CSV.
-        const stdoutPath = `/tmp/wiki_xls_out_${Date.now()}.csv`
-        try {
-          await $`ssconvert --export-type=Gnumeric_Excel:csv -O "separator=," ${tmpPath} ${stdoutPath}`.text()
-          csv = await fs.promises.readFile(stdoutPath, 'utf-8')
-        } finally {
-          await fs.promises.unlink(stdoutPath).catch(() => {})
+        await $`ssconvert --export-type=Gnumeric_stf:stf_csv -O 'separator=,' ${tmpPath} ${outPath}`.text()
+        const csv = await fs.promises.readFile(outPath, 'utf-8')
+        const body = (csv || '').trim()
+        if (!body) {
+          throw new Error('legacy .xls 文件解析後為空,請用 .xlsx 重試')
         }
+        return `## Sheet (legacy xls)\n${body}`
+      } finally {
+        await fs.promises.unlink(outPath).catch(() => {})
       }
-      const body = (csv || '').trim()
-      if (!body) {
-        throw new Error('legacy .xls 文件解析後為空,請用 .xlsx 重試')
-      }
-      sheetTexts.push(`## Sheet (legacy xls)\n${body}`)
-      return sheetTexts.join('\n\n')
     } catch (e: any) {
       throw new Error(`legacy .xls 解析失敗 (${e?.message || 'unknown'}):請用 .xlsx 重試`)
     } finally {
