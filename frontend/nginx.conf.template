@@ -76,16 +76,22 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto https;
-            # Sprint 21 US-21.4 SSE/streaming tuning
-            # - proxy_buffering off: 唔好等 buffer 滿先 flush,逐個 frame 即出
-            # - proxy_cache off:    唔好 cache streaming response
-            # - proxy_read_timeout: LLM call 可能 30s+,等夠耐
-            # 注意:唔好加 proxy_buffer_size 0,會連 request header 都
-            #       唔 buffer,non-streaming endpoint 會 break(踩過坑)
-            proxy_buffering off;
+            # Sprint 21 US-21.4 SSE/streaming:
+            #
+            # 對齊 \`net::ERR_INCOMPLETE_CHUNKED_ENCODING\` 嘅修法:
+            # - 唔好用 \`proxy_buffering off\` — nginx 唔識 emit 結尾個
+            #   0\\r\\n\\r\\n end-of-chunks marker,瀏覽器 hang 喺度等
+            # - 用 default (on) — nginx 會 buffer 完整 response 然後
+            #   emit 正確嘅 chunked encoding 結尾
+            # - LLM call 通常 5-30s,buffering 多等少少時間用戶唔會
+            #   注意到(而用戶見到 streaming chunked 反而壞咗)
+            # - \`proxy_buffer_size 16k\`(default 已經係咁,但寫明)畀
+            #   nginx 預留空間放 response header,避免 502
+            # - 關閉 cache 同 gzip
+            # - proxy_read_timeout 600s 等 LLM call
             proxy_cache off;
+            gzip off;
             proxy_read_timeout 600s;
-            proxy_send_timeout 600s;
             client_max_body_size 50M;
         }
 
