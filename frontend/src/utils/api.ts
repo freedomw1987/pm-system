@@ -286,11 +286,17 @@ export const documentApi = {
     onProgress: (event: T) => void,
     signal?: AbortSignal
   ): Promise<void> => {
+    // fetch 唔似 axios `api` instance 有 request interceptor 自動加 token,
+    // 我哋要手動拎 accessToken 加落 header,否則後端會 401 reject
+    const accessToken = localStorage.getItem('accessToken')
     const res = await fetch(`${API_URL}/documents/batch-parse`, {
       method: 'POST',
       body: formData,
       // 唔好 set Content-Type header,fetch 會自己加 boundary
       signal,
+      headers: accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined,
     })
 
     if (!res.ok || !res.body) {
