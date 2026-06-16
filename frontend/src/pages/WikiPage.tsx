@@ -121,6 +121,50 @@ export default function WikiPage() {
     }
   }
 
+  // Sprint 21 US-21.3: user pressed "更新此頁" on a duplicate — call PUT
+  // /wikis/:id with the existing page's id. The latest parsed content is
+  // already in the batch result (we keep the structured LLM analysis).
+  const handleReplaceWikiPage = async (result: any) => {
+    if (!result?.existingPage?.id) return
+    const replaceId = result.existingPage.id
+    const newTitle = result.existingPage.title
+    // We have only the existing page's title in the result; for the content
+    // we use the original parsedTextPreview. To avoid losing detail, the
+    // backend's PUT only updates title (since the user is replacing in
+    // place). A more thorough flow would re-run parse+analyze, but that
+    // costs another LLM call — out of scope for Sprint 21.
+    const newContent = result.parsedTextPreview || result.analysis?.wikiContent || result.analysis?.content || ''
+    const tags: string[] = result.analysis?.tags || ['ai-parsed']
+
+    try {
+      const res = await fetch(`/api/wikis/${replaceId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          title: newTitle,
+          content: newContent,
+          tags
+        })
+      })
+      if (res.ok) {
+        // Remove the duplicate row, optionally re-fetch
+        setBatchResults(prev => prev.map(r =>
+          r === result ? { ...r, duplicate: false, replaced: true, wikiPage: { id: replaceId, title: newTitle } } : r
+        ))
+        fetchPages()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        alert(`更新失敗: ${data?.error?.message || res.statusText}`)
+      }
+    } catch (err) {
+      console.error('Replace failed:', err)
+      alert('更新失敗,請稍後再試')
+    }
+  }
+
   return (
     <div className="max-w-5xl">
       <div className="flex items-center justify-between mb-6">
@@ -183,14 +227,15 @@ export default function WikiPage() {
           )}
           <div className="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
             <p className="font-medium text-blue-800 mb-1">支援格式</p>
-            <p className="text-blue-700">PDF、Word (.docx)、Excel (.xlsx)、Markdown (.md)</p>
+            <p className="text-blue-700">PDF、Word (.docx / .doc)、Excel (.xlsx / .xls)、Markdown (.md)、純文字 (.txt)</p>
             <p className="text-blue-600 mt-1">最多 20 個文件，每個最大 50MB</p>
+            <p className="text-blue-600 mt-1 text-xs">ℹ️ 同一項目內已有同名 Wiki 時,會自動偵測並提示您確認是否更新</p>
           </div>
           <div className="mb-4">
             <input
               type="file"
               multiple
-              accept=".pdf,.docx,.xlsx,.md"
+              accept=".pdf,.docx,.xlsx,.md,.doc,.xls,.txt"
               onChange={handleBatchFilesChange}
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
             />
@@ -210,22 +255,50 @@ export default function WikiPage() {
               <div className="p-2 bg-gray-50 border-b sticky top-0">
                 <p className="text-sm font-medium">
                   結果：{batchResults.filter(r => r.success).length}/{batchResults.length} 成功
-                  {batchResults.length > 0 && batchResults[0].wikiPagesCreated > 0 &&
-                    `，已建立 ${batchResults[0].wikiPagesCreated} 個 Wiki 頁面`}
+                  {(() => {
+                    const created = batchResults[0]?.wikiPagesCreated ?? 0
+                    const dupes = batchResults.filter(r => r.success && r.duplicate).length
+                    return (
+                      <>
+                        {created > 0 && `，已建立 ${created} 個 Wiki 頁面`}
+                        {dupes > 0 && `，${dupes} 個檔案偵測到同項目已有同名 Wiki`}
+                      </>
+                    )
+                  })()}
                 </p>
               </div>
               <div className="divide-y divide-gray-100">
                 {batchResults.map((r, i) => (
                   <div key={i} className="p-3 flex items-center gap-3 text-sm">
                     {r.success ? (
-                      <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                      r.duplicate ? (
+                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                      ) : (
+                        <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                      )
                     ) : (
                       <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
                     )}
-                    <span className="font-medium">{r.name}</span>
-                    {!r.success && <span className="text-red-500 text-xs">{r.error}</span>}
-                    {r.success && r.wikiPage && (
-                      <Link to={`/wikis/${r.wikiPage.id}`} className="text-primary-600 text-xs hover:underline ml-auto">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium">{r.name}</span>
+                      {r.duplicate && r.existingPage && (
+                        <div className="text-xs text-amber-700 mt-1">
+                          ⚠️ 同項目已有同名 Wiki:「{r.existingPage.title}」
+                          (更新於 {new Date(r.existingPage.updatedAt).toLocaleDateString('zh-HK')})
+                        </div>
+                      )}
+                      {!r.success && <span className="text-red-500 text-xs block">{r.error}</span>}
+                    </div>
+                    {r.duplicate && r.existingPage && (
+                      <button
+                        onClick={() => handleReplaceWikiPage(r)}
+                        className="px-3 py-1 bg-amber-500 text-white text-xs rounded hover:bg-amber-600"
+                      >
+                        更新此頁
+                      </button>
+                    )}
+                    {r.success && r.wikiPage && !r.duplicate && (
+                      <Link to={`/wikis/${r.wikiPage.id}`} className="text-primary-600 text-xs hover:underline">
                         查看 →
                       </Link>
                     )}

@@ -1,5 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { prisma } from '../utils/prisma'
+import { findExistingWikiPage } from '../utils/wiki-dedup'
 
 const wikiRoutes = new Elysia({ prefix: '/wikis' })
   // List wiki pages — optional projectId filter, optional search
@@ -86,19 +87,20 @@ const wikiRoutes = new Elysia({ prefix: '/wikis' })
 
     return { page }
   })
-  // Create wiki page
+  // Create wiki page (or replace existing one if `replaceId` is provided)
   .post('/', async ({ body, set, user }) => {
     if (!user) {
       set.status = 401
       return { error: { code: 'UNAUTHORIZED', message: 'Login required' } }
     }
 
-    const { projectId, title, content, tags, order } = body as {
+    const { projectId, title, content, tags, order, replaceId } = body as {
       projectId: string
       title: string
       content?: string
       tags?: string[]
       order?: number
+      replaceId?: string
     }
 
     if (!projectId || !title) {
@@ -114,6 +116,45 @@ const wikiRoutes = new Elysia({ prefix: '/wikis' })
       if (!membership) {
         set.status = 403
         return { error: { code: 'FORBIDDEN', message: 'Not a project member' } }
+      }
+    }
+
+    // Sprint 21 US-21.3: if `replaceId` is provided, UPDATE that page in place
+    // (content + tags + title). This is the path the frontend takes after
+    // confirming a duplicate upload. Skip the dup-check since user has
+    // already chosen to update.
+    if (replaceId) {
+      const existing = await prisma.wikiPage.findUnique({ where: { id: replaceId } })
+      if (!existing || existing.projectId !== projectId) {
+        set.status = 404
+        return { error: { code: 'NOT_FOUND', message: 'Page to replace not found in this project' } }
+      }
+      const page = await prisma.wikiPage.update({
+        where: { id: replaceId },
+        data: {
+          title,
+          content: content ?? existing.content,
+          tags: tags ?? existing.tags
+        },
+        include: {
+          createdBy: { select: { id: true, name: true } }
+        }
+      })
+      return { page, replaced: true }
+    }
+
+    // Sprint 21 US-21.3: detect duplicate within same project.
+    // If duplicate exists, refuse creation and tell frontend to ask the user
+    // to call back with `replaceId`.
+    const existingPage = await findExistingWikiPage(projectId, title)
+    if (existingPage) {
+      set.status = 409
+      return {
+        error: {
+          code: 'DUPLICATE_PAGE',
+          message: '同項目內已有同名 Wiki 頁面',
+          existingPage
+        }
       }
     }
 
@@ -138,7 +179,8 @@ const wikiRoutes = new Elysia({ prefix: '/wikis' })
       title: t.String(),
       content: t.Optional(t.String()),
       tags: t.Optional(t.Array(t.String())),
-      order: t.Optional(t.Number())
+      order: t.Optional(t.Number()),
+      replaceId: t.Optional(t.String())
     })
   })
   // Update wiki page

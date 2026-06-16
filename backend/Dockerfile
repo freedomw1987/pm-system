@@ -5,7 +5,9 @@
 FROM oven/bun:1-alpine AS builder
 
 # poppler-utils needed for PDF → image conversion in routes
-RUN apk add --no-cache poppler-utils
+# Sprint 21: antiword (legacy .doc) + xls2csv (legacy .xls) + catdoc fallback
+#            Pure native binaries, zero CVE (vs SheetJS xlsx@0.18.5 which has Prototype Pollution + ReDoS — see REGRESSION-GUARD.md)
+RUN apk add --no-cache poppler-utils antiword xls2csv catdoc
 
 WORKDIR /app
 
@@ -37,7 +39,8 @@ RUN DATABASE_URL=postgresql://build:build@localhost:5432/build bunx prisma gener
 FROM oven/bun:1-alpine
 
 # poppler-utils still needed at runtime (PDF conversion in request handlers)
-RUN apk add --no-cache poppler-utils
+# Sprint 21: antiword + xls2csv + catdoc also needed for legacy Office file parsing
+RUN apk add --no-cache poppler-utils antiword xls2csv catdoc
 
 WORKDIR /app
 

@@ -180,7 +180,10 @@ describe('Document upload validation (US-8.8)', () => {
   })
 
   describe('supported file types', () => {
-    const SUPPORTED_EXTENSIONS = ['.docx', '.md', '.xlsx', '.pdf']
+    // Sprint 21 US-21.1: added .doc (legacy Word) + .xls (legacy Excel) + .txt
+    // (plain text). Parsers: antiword for .doc, xls2csv for .xls, plain read
+    // for .txt, catdoc as fallback for .doc, ssconvert as fallback for .xls.
+    const SUPPORTED_EXTENSIONS = ['.docx', '.md', '.xlsx', '.pdf', '.doc', '.xls', '.txt']
 
     test('accepts docx', () => {
       expect(SUPPORTED_EXTENSIONS).toContain('.docx')
@@ -198,10 +201,22 @@ describe('Document upload validation (US-8.8)', () => {
       expect(SUPPORTED_EXTENSIONS).toContain('.pdf')
     })
 
+    test('accepts legacy doc (Sprint 21 US-21.1)', () => {
+      expect(SUPPORTED_EXTENSIONS).toContain('.doc')
+    })
+
+    test('accepts legacy xls (Sprint 21 US-21.1)', () => {
+      expect(SUPPORTED_EXTENSIONS).toContain('.xls')
+    })
+
+    test('accepts txt (Sprint 21 US-21.1)', () => {
+      expect(SUPPORTED_EXTENSIONS).toContain('.txt')
+    })
+
     test('rejects unsupported types', () => {
-      expect(SUPPORTED_EXTENSIONS).not.toContain('.txt')
       expect(SUPPORTED_EXTENSIONS).not.toContain('.png')
       expect(SUPPORTED_EXTENSIONS).not.toContain('.exe')
+      expect(SUPPORTED_EXTENSIONS).not.toContain('.zip')
     })
   })
 })

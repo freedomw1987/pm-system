@@ -572,9 +572,11 @@ export default function ChatPage() {
           <select
             value={selectedProjectId}
             onChange={e => setSelectedProjectId(e.target.value)}
-            className="input-field py-1.5 text-sm max-w-48"
+            className="input-field py-1.5 text-sm max-w-56"
           >
-            <option value="">— 選擇項目（可選）—</option>
+            {/* Sprint 21 US-21.5: empty value → cross-project query. AI will
+                search across all member projects (or all projects for admin). */}
+            <option value="">🌐 全部項目 (跨項目搜尋)</option>
             {projects.map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
