@@ -8,11 +8,26 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
+      # HTTP 80 → 自動 301 redirect 去 HTTPS(由 nginx.conf.template 處理)
       - "8080:80"
+      # HTTPS 443 — 服務實際 frontend + /api proxy
+      # 443 係 privileged port,本機用 8443 map 去 container 嘅 443
+      - "8443:443"
+    volumes:
+      # Self-signed TLS cert(由 deploy/gen-cert.sh 產生,放 deploy/docker/certs/)
+      # 跟 production docker-compose.client.yml 一樣嘅 mount path
+      - ./deploy/docker/certs:/etc/nginx/certs:ro
+    environment:
+      # 配合 host port 8443 → container 443
+      # EXTERNAL_HTTPS_PORT 控制 HTTP→HTTPS redirect 嘅 target port
+      EXTERNAL_HTTPS_PORT: "443"
+      EXTERNAL_HTTP_PORT: "80"
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80 || exit 1"]
+      # wget --no-check-certificate 因為 self-signed cert 唔受默認信任
+      # 撞 HTTPS endpoint 而唔係 HTTP(後者會 301,跟 redirect 會撞 cert 問題)
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1:443/ >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
