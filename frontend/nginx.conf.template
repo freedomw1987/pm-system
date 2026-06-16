@@ -1,6 +1,8 @@
 worker_processes 1;
 events {
     worker_connections 1024;
+    # 唔用 multi_accept — 簡化 connection handling
+    multi_accept off;
 }
 
 http {
@@ -42,6 +44,15 @@ http {
         # http2 on;
         server_name _;
 
+        # keepalive_timeout 0: 連 keep-alive 都 disable,迫每個 request
+        # 都用新 connection,避免 nginx keep-alive socket 上面嘅 SSE
+        # streaming response flush 唔切結尾 0\\r\\n\\r\\n marker 嘅 bug
+        # (`net::ERR_INCOMPLETE_CHUNKED_ENCODING`)。成本係每個
+        # request 多一次 TLS handshake,但內部 app 唔在乎。
+        # Static assets 都 disable — 但 SPA 已經 cache 喺瀏覽器,
+        # static file load 少,影響微。
+        keepalive_timeout 0;
+
         ssl_certificate     /etc/nginx/certs/server.crt;
         ssl_certificate_key /etc/nginx/certs/server.key;
         ssl_protocols       TLSv1.2 TLSv1.3;
@@ -79,20 +90,27 @@ http {
             # Sprint 21 US-21.4 SSE/streaming:
             #
             # 對齊 \`net::ERR_INCOMPLETE_CHUNKED_ENCODING\` 嘅修法:
-            # - 唔好用 \`proxy_buffering off\` — nginx 唔識 emit 結尾個
-            #   0\\r\\n\\r\\n end-of-chunks marker,瀏覽器 hang 喺度等
-            # - 用 default (on) — nginx 會 buffer 完整 response 然後
-            #   emit 正確嘅 chunked encoding 結尾
-            # - LLM call 通常 5-30s,buffering 多等少少時間用戶唔會
-            #   注意到(而用戶見到 streaming chunked 反而壞咗)
-            # - \`proxy_buffer_size 16k\`(default 已經係咁,但寫明)畀
-            #   nginx 預留空間放 response header,避免 502
-            # - 關閉 cache 同 gzip
-            # - proxy_read_timeout 600s 等 LLM call
+            # - keep-alive 會搞亂 chunked encoding 結尾 marker
+            #   nginx 喺 keep-alive socket 上面 send 結尾個 0\\r\\n\\r\\n
+            #   但瀏覽器等緊下一個 keep-alive 連線嘅 first chunk,
+            #   結果 hang 喺度,然後 throw ERR_INCOMPLETE_CHUNKED_ENCODING
+            # - 用 \`Connection: close\` 迫每個 SSE response 都係 standalone
+            #   連線,backend 寫完 controller.close() 之後 nginx 立即
+            #   emit 結尾 marker 再 close socket,瀏覽器收到完整 body
+            # - LLM call 通常 5-30s,每次重新 handshake 嘅成本 < 1ms,
+            #   對 streaming 體驗冇影響
+            proxy_buffering off;
+            proxy_request_buffering off;
             proxy_cache off;
             gzip off;
             proxy_read_timeout 600s;
+            proxy_send_timeout 600s;
             client_max_body_size 50M;
+            # 重要:每次 SSE response 結束立即 close connection
+            # 清空傳入嘅 Connection header,等 nginx 預設行為 emit close
+            proxy_set_header Connection "";
+            # 移除 backend 可能 emit 嘅 keep-alive
+            proxy_hide_header Connection;
         }
 
         location /auth {
