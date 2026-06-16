@@ -244,3 +244,74 @@ describe('LLM JSON response structure (US-8.8)', () => {
     expect(minimalResponse.recommendations).toBeUndefined()
   })
 })
+/**
+ * Sprint 21 US-21.4 hotfix: safeSend race condition tests
+ *
+ * Background: Browser 取消 fetch / connection reset 會令 SSE controller
+ * 自動 closed,workers 仲 send 就 throw `TypeError: Invalid state:
+ * Controller is already closed`。safeSend helper 自動 try/catch,closed
+ * 嗰陣 silently drop,workers 繼續完成 file processing。
+ */
+describe('safeSend (Sprint 21 US-21.4 hotfix)', () => {
+  test('closed controller 嘅 enqueue 確實 throw "Invalid state" error', () => {
+    // 確認 web standard 行為:closed controller 嘅 enqueue 必 throw。
+    // 呢個 test 模擬個場景,然後 safeSend 嘅 catch 邏輯去 swallow 佢。
+    let closedError: any = null
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('init'))
+        c.close()
+        // 攞住 controller reference 試 enqueue 第二次 — 必 throw
+        try {
+          c.enqueue(new TextEncoder().encode('after-close'))
+        } catch (e: any) {
+          closedError = e
+        }
+      }
+    })
+    expect(closedError).not.toBeNull()
+    expect(closedError.message).toMatch(/Invalid state|already closed/i)
+  })
+
+  test('safeSend 風格: try/catch 包裝 + 過濾 "Controller is already closed"', () => {
+    // 直接 inline test safeSend 嘅 catch 邏輯(因為 controller 唔易構造)
+    function safeSendPattern(
+      enqueue: () => void,
+      isClosedError: (e: any) => boolean
+    ): boolean {
+      try {
+        enqueue()
+        return true
+      } catch (err: any) {
+        if (isClosedError(err)) {
+          return false  // silent drop
+        }
+        throw err
+      }
+    }
+
+    const isClosedError = (e: any) =>
+      e?.message?.includes('Controller is already closed') ||
+      e?.message?.includes('Invalid state')
+
+    // 模擬 closed controller
+    expect(safeSendPattern(
+      () => { throw new TypeError('Controller is already closed') },
+      isClosedError
+    )).toBe(false)
+
+    // 模擬正常 enqueue
+    let called = false
+    expect(safeSendPattern(
+      () => { called = true },
+      isClosedError
+    )).toBe(true)
+    expect(called).toBe(true)
+
+    // 模擬其他 error (唔係 closed) 應該 rethrow
+    expect(() => safeSendPattern(
+      () => { throw new Error('other error') },
+      isClosedError
+    )).toThrow('other error')
+  })
+})

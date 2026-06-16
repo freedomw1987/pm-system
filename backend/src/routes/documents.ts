@@ -579,6 +579,45 @@ function sseEncode(data: unknown): string {
 }
 
 /**
+ * Safe wrapper for controller.enqueue — silently drop 已經 closed 嘅 controller
+ *
+ * Race condition 場景:
+ *   - browser fetch 個 SSE stream 然後 user 取消 / 關 tab / refresh
+ *   - 個 connection close 咗,underlying ReadableStream 嘅 controller
+ *     自動 closed
+ *   - 但 server 嗰邊 worker 仲喺度跑緊,佢嘗試 `send({...})` 就會
+ *     throw \`TypeError: Invalid state: Controller is already closed\`
+ *   - 個 throw 會 reject worker promise → Promise.all reject →
+ *     catch block 跑 → catch block 又試 send error event → 又 throw
+ *   - 結果: log 充滿 spurious error,user 體驗反而受影響
+ *
+ * 修法: \`safeSend\` 自動 try/catch,controller closed 嗰陣 silently
+ * 吞咗 throw,worker 繼續完成 file processing。
+ *
+ * 注意: \`controller.error()\` 唔好 call — 已經 closed 嘅 controller
+ * 再 error 會 throw,我哋嘅目標係 quietly 放棄 send 而已。
+ */
+function safeSend(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  payload: unknown
+): void {
+  try {
+    controller.enqueue(encoder.encode(sseEncode(payload)))
+  } catch (err: any) {
+    // Controller closed (browser disconnect, network reset, etc.)
+    // 唔好 throw,worker 完成 file processing 仲可以寫入 DB
+    // (frontend 已經唔再 listening,event 丟咗就算)
+    if (err?.message?.includes('Controller is already closed') ||
+        err?.message?.includes('Invalid state')) {
+      return  // silent — 預期行為
+    }
+    // 其他 error 仍然 rethrow (例如 controller.error 已經 set 等)
+    throw err
+  }
+}
+
+/**
  * 從 Elysia / FormData 嘅 file object 抽出標準 UploadedFileInfo
  * (從原本 inline 喺 batch-parse 嘅 code 抽出,畀 streaming endpoint 同
  *  helper 共用)
@@ -1029,7 +1068,13 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const send = (payload: unknown) => controller.enqueue(encoder.encode(sseEncode(payload)))
+        // Sprint 21 US-21.4 hotfix: 用 safeSend 包 controller.enqueue。
+        // Browser 取消 fetch / connection reset 會令 controller closed,
+        // 然後 workers 仲 send 就 throw 'Controller is already closed'。
+        // safeSend silently drop 咗 D 預期嘅 closed-controller error,
+        // workers 仲繼續完成 file processing(寫 DB / upload 等),
+        // 唔好因為 frontend 唔再 listen 就 crash 個 batch。
+        const send = (payload: unknown) => safeSend(controller, encoder, payload)
         let successful = 0
         let failed = 0
         let wikiPagesCreatedInner = 0
@@ -1062,9 +1107,17 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           })
         } catch (err: any) {
           console.error('[batch-parse] stream error:', err)
+          // 用 safeSend,避免 catch block 都 throw(可能 controller 已 closed)
           send({ type: 'error', message: err?.message || 'batch processing failed' })
         } finally {
-          controller.close()
+          // controller.close() 喺 finally 一定跑 — 即使有 throw,確保
+          // ReadableStream 完整 close,frontend fetch reader 嘅 done
+          // 會係 true,觸發 while loop 退出
+          try {
+            controller.close()
+          } catch {
+            // 已經 closed 嘅話 swallow 咗
+          }
         }
       }
     })
