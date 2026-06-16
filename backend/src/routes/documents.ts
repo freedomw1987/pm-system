@@ -14,6 +14,24 @@ const SUPPORTED_EXTENSIONS = ['.docx', '.md', '.xlsx', '.pdf', '.doc', '.xls', '
 const MAX_PROMPT_TEXT_LENGTH = 60_000
 
 /**
+ * Sprint 21 US-21.4 hotfix: LLM call 嘅 explicit timeout。
+ *
+ * 點解需要:
+ *   - Bun.fetch 默認 5 分鐘 timeout,reject 之後會 throw AbortError
+ *   - 如果 timeout 喺 nginx \`proxy_read_timeout\` (600s) 之後 trigger,
+ *     nginx 會見到 upstream 提前 close,response chunk 寫唔切尾 marker
+ *   - browser fetch throw \`upstream prematurely closed\` 之後無完整 body
+ *   - 對 user: 個 file 永遠 hanging,UI 唔知 fail 咗
+ *
+ * 設 240s (4 分鐘):
+ *   - 短過 nginx proxy_read_timeout 600s,timeout 觸發喺 nginx 之前
+ *   - LLM call 通常 5-60s,4 分鐘對正常 response 已經超寬
+ *   - 對大檔案 / 慢 LLM,return clean error 結果(file:success=false,error="AI timeout")
+ *   - 環境變數可 override: \`LLM_TIMEOUT_MS\`
+ */
+const LLM_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.LLM_TIMEOUT_MS || '240000', 10))
+
+/**
  * Sprint 21: 批次上傳 queue 嘅並發上限。
  * 設 3 嘅原因:
  *   - 大多數 LLM provider (OpenAI / Claude / Qwen) 都有限速 RPM/TPM
@@ -766,7 +784,10 @@ async function analyzePdfWithImages(
         temperature: 0.2,
         stream: false,
         messages
-      })
+      }),
+      // Sprint 21 US-21.4 hotfix: explicit timeout 短過 nginx
+      // proxy_read_timeout,避免 upstream prematurely closed
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
     })
 
     if (!response.ok) {
@@ -846,7 +867,10 @@ ${truncateText(parsedText)}` }
         temperature: 0.2,
         stream: false,
         messages
-      })
+      }),
+      // Sprint 21 US-21.4 hotfix: explicit timeout 短過 nginx
+      // proxy_read_timeout,避免 upstream prematurely closed
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
     })
 
     if (!response.ok) {
