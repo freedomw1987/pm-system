@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, FileText, Edit2, Trash2, BookOpen, Upload, CheckCircle, AlertCircle, X, Search } from 'lucide-react'
-import { wikiApi, documentApi } from '../utils/api'
+import { Plus, FileText, Edit2, Trash2, BookOpen, Upload, CheckCircle, AlertCircle, X, Search, Loader2, Clock } from 'lucide-react'
+import { wikiApi, documentApi, type BatchParseProgressEvent } from '../utils/api'
 import WikiEditor from './WikiEditor'
 
 interface WikiPage {
@@ -29,7 +29,25 @@ export default function WikiTab({ projectId }: WikiTabProps) {
   const [showBatchUpload, setShowBatchUpload] = useState(false)
   const [batchFiles, setBatchFiles] = useState<File[]>([])
   const [batchUploading, setBatchUploading] = useState(false)
-  const [batchResults, setBatchResults] = useState<any[]>([])
+  // Sprint 21 US-21.4: streaming progress — 每個 file 嘅實時狀態
+  // 用 object lookup(index -> status)而非 array,適合中途加 / 移除
+  const [batchProgress, setBatchProgress] = useState<Record<number, {
+    name: string
+    status: 'pending' | 'processing' | 'success' | 'error' | 'duplicate'
+    error?: string
+    type?: string
+    size?: number
+  }>>({})
+  const [batchSummary, setBatchSummary] = useState<{
+    total: number
+    successful: number
+    failed: number
+    wikiPagesCreated: number
+  } | null>(null)
+  const [batchError, setBatchError] = useState<string>('')
+  const [batchConcurrency, setBatchConcurrency] = useState(3)
+  // 統計「處理中」嘅數量(用嚟 render progress bar)
+  const batchInFlight = useRef(0)
 
   useEffect(() => { loadPages() }, [projectId])
 
@@ -83,99 +101,179 @@ export default function WikiTab({ projectId }: WikiTabProps) {
   const handleBatchFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : []
     setBatchFiles(files)
-    setBatchResults([])
+    setBatchProgress({})
+    setBatchSummary(null)
+    setBatchError('')
+    batchInFlight.current = 0
   }
 
   const handleBatchUpload = async () => {
     if (batchFiles.length === 0) return
     setBatchUploading(true)
-    setBatchResults([])
+    setBatchProgress({})
+    setBatchSummary(null)
+    setBatchError('')
+    batchInFlight.current = 0
 
     const formData = new FormData()
     batchFiles.forEach(file => formData.append('files', file))
     formData.append('projectId', projectId)
 
     try {
-      const res = await documentApi.batchParse(formData)
-      const results = res.data.results || []
-      setBatchResults(results)
-      if (res.data.wikiPagesCreated > 0) {
-        loadPages()
-      }
-      // Auto-close and return to wiki list after 2 seconds
-      setTimeout(() => {
-        setShowBatchUpload(false)
-        setBatchFiles([])
-        setBatchResults([])
-      }, 2000)
-    } catch (err) {
+      // Sprint 21 US-21.4: 用 SSE streaming,每個 file 完成即時更新 UI
+      await documentApi.batchParseStream(
+        formData,
+        (event: BatchParseProgressEvent) => {
+          if (event.type === 'start') {
+            setBatchConcurrency(event.concurrency || 3)
+            // 預先初始化所有 file 為 'pending',咁 UI 一開始就有完整 list
+            const init: typeof batchProgress = {}
+            event.fileNames?.forEach((name, idx) => {
+              init[idx] = { name, status: 'pending' }
+            })
+            setBatchProgress(init)
+          } else if (event.type === 'file') {
+            setBatchProgress((prev) => ({
+              ...prev,
+              [event.index!]: {
+                name: event.name || prev[event.index!]?.name || 'unknown',
+                status: event.success
+                  ? (event.duplicate ? 'duplicate' : 'success')
+                  : 'error',
+                error: event.error,
+                type: event.fileType,
+                size: event.size
+              }
+            }))
+            // 統計有冇未完成嘅 file → 維持 progress bar
+            if (event.success === false) {
+              // 失敗都算 done
+            }
+          } else if (event.type === 'complete') {
+            setBatchSummary({
+              total: event.total || 0,
+              successful: event.successful || 0,
+              failed: event.failed || 0,
+              wikiPagesCreated: event.wikiPagesCreated || 0
+            })
+            // Reload wiki pages so the new ones appear in the sidebar
+            if ((event.wikiPagesCreated || 0) > 0) {
+              loadPages()
+            }
+          } else if (event.type === 'error') {
+            setBatchError(event.message || 'batch processing failed')
+          }
+        }
+      )
+    } catch (err: any) {
       console.error('Batch upload failed:', err)
-      setBatchResults([{ name: '上傳失敗', success: false, error: '上傳過程中發生錯誤' }])
+      setBatchError(err?.message || '上傳過程中發生錯誤')
     } finally {
       setBatchUploading(false)
     }
   }
 
+  // 重新打開 modal 時 reset 狀態(避免殘留上次嘅 progress)
+  const closeBatchModal = () => {
+    setShowBatchUpload(false)
+    setBatchFiles([])
+    setBatchProgress({})
+    setBatchSummary(null)
+    setBatchError('')
+    batchInFlight.current = 0
+  }
+
   const stripMarkdown = (md: string) =>
     md.replace(/[#*`>\[\]!]/g, '').replace(/\n+/g, ' ').trim().slice(0, 80) || '（無內容）'
 
-  // Batch upload modal
+  // Batch upload modal (Sprint 21 US-21.4: streaming progress UI)
   if (showBatchUpload) {
+    const completedCount = Object.values(batchProgress).filter(
+      (p) => p.status === 'success' || p.status === 'duplicate' || p.status === 'error'
+    ).length
+    const isInProgress = batchUploading && !batchSummary
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-gray-900">批量上傳文件（AI 解析）</h3>
           <button
-            onClick={() => { setShowBatchUpload(false); setBatchFiles([]); setBatchResults([]) }}
+            onClick={closeBatchModal}
             className="p-1 text-gray-400 hover:text-gray-600"
+            disabled={isInProgress}
+            title={isInProgress ? '處理中,唔可以關閉' : '關閉'}
           >
             <X size={20} />
           </button>
         </div>
         <div className="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
-          <p className="text-blue-700">支援格式：PDF、Word (.docx)、Excel (.xlsx)、Markdown (.md)</p>
-          <p className="text-blue-600 mt-1">最多 20 個文件，每個最大 50MB。AI 會自動為每個文件建立 Wiki 頁面。</p>
-          <p className="text-blue-600 mt-1">支援視覺模型的 AI（如 Claude、GPT-4o）可直接解析 PDF 中的圖片。</p>
+          <p className="text-blue-700">
+            支援格式:PDF、Word (.docx / .doc)、Excel (.xlsx / .xls)、Markdown (.md)、純文字 (.txt)
+          </p>
+          <p className="text-blue-600 mt-1">
+            檔案數量無上限(每個最大 50MB),server 會以 {batchConcurrency} 個並發排隊處理,
+            AI 會自動為每個文件建立 Wiki 頁面。
+          </p>
+          <p className="text-blue-600 mt-1">
+            支援視覺模型的 AI(如 Claude、GPT-4o)可直接解析 PDF 中的圖片。
+          </p>
         </div>
         <div className="mb-4">
           <input
             type="file"
             multiple
-            accept=".pdf,.docx,.xlsx,.md"
+            // Sprint 21 US-21.1: 加 .doc / .xls / .txt 對齊 backend SUPPORTED_EXTENSIONS
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.md,.txt"
             onChange={handleBatchFilesChange}
-            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+            disabled={isInProgress}
+            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 disabled:opacity-50"
           />
         </div>
         {batchFiles.length > 0 && (
           <div className="mb-4">
-            <p className="text-sm font-medium text-gray-700 mb-2">已選擇 {batchFiles.length} 個文件：</p>
-            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-              {batchFiles.map((file, i) => (
-                <span key={i} className="px-3 py-1 bg-gray-100 rounded-full text-sm">{file.name}</span>
+            <p className="text-sm font-medium text-gray-700 mb-2">
+              已選擇 {batchFiles.length} 個文件
+              {batchSummary && ` · 成功 ${batchSummary.successful} / 失敗 ${batchSummary.failed}`}
+            </p>
+            {/* Progress bar — 已完成 / 總數 */}
+            {Object.keys(batchProgress).length > 0 && (
+              <div className="w-full bg-gray-200 rounded-full h-1.5 mb-3 overflow-hidden">
+                <div
+                  className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${(completedCount / batchFiles.length) * 100}%` }}
+                />
+              </div>
+            )}
+            {/* 個別 file 進度 list(實時更新) */}
+            <div className="max-h-64 overflow-y-auto border rounded-lg divide-y divide-gray-100">
+              {Object.entries(batchProgress).map(([idx, p]) => (
+                <div key={idx} className="p-3 flex items-center gap-3 text-sm">
+                  {p.status === 'pending' && (
+                    <Clock className="w-4 h-4 text-gray-400 shrink-0" />
+                  )}
+                  {p.status === 'success' && (
+                    <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                  )}
+                  {p.status === 'duplicate' && (
+                    <CheckCircle className="w-4 h-4 text-yellow-500 shrink-0" />
+                  )}
+                  {p.status === 'error' && (
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  )}
+                  <span className="font-medium flex-1 truncate">{p.name}</span>
+                  <span className="text-xs text-gray-400 shrink-0">
+                    {p.status === 'pending' && '等待中'}
+                    {p.status === 'success' && '已建立 Wiki'}
+                    {p.status === 'duplicate' && '已存在(同名)'}
+                    {p.status === 'error' && (p.error || '失敗')}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
         )}
-        {batchResults.length > 0 && (
-          <div className="mb-4 max-h-48 overflow-y-auto border rounded-lg">
-            <div className="p-2 bg-gray-50 border-b sticky top-0">
-              <p className="text-sm font-medium">
-                結果：{batchResults.filter(r => r.success).length}/{batchResults.length} 成功
-              </p>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {batchResults.map((r, i) => (
-                <div key={i} className="p-3 flex items-center gap-3 text-sm">
-                  {r.success ? (
-                    <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                  )}
-                  <span className="font-medium">{r.name}</span>
-                  {!r.success && <span className="text-red-500 text-xs">{r.error}</span>}
-                </div>
-              ))}
-            </div>
+        {batchError && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg">
+            <strong>批次錯誤:</strong> {batchError}
           </div>
         )}
         <div className="flex gap-3">
@@ -186,8 +284,8 @@ export default function WikiTab({ projectId }: WikiTabProps) {
           >
             {batchUploading ? (
               <>
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                處理中...
+                <Loader2 size={16} className="animate-spin" />
+                處理中... ({completedCount}/{batchFiles.length})
               </>
             ) : (
               <>
@@ -197,10 +295,11 @@ export default function WikiTab({ projectId }: WikiTabProps) {
             )}
           </button>
           <button
-            onClick={() => { setShowBatchUpload(false); setBatchFiles([]); setBatchResults([]) }}
-            className="px-5 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50"
+            onClick={closeBatchModal}
+            disabled={isInProgress}
+            className="px-5 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
           >
-            取消
+            {batchSummary ? '完成' : '取消'}
           </button>
         </div>
       </div>

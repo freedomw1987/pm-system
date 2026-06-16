@@ -238,15 +238,107 @@ export const wikiApi = {
 }
 
 // Document import API (Word/Excel/PDF → MD via LLM)
+export interface BatchParseProgressEvent {
+  type: 'start' | 'file' | 'complete' | 'error'
+  // start
+  total?: number
+  concurrency?: number
+  fileNames?: string[]
+  // file
+  index?: number
+  name?: string
+  success?: boolean
+  /** File extension 類型(eg '.pdf'、'.docx'),用嚟顯示 icon / size 統計。避免同 `type` event name 撞名 */
+  fileType?: string
+  size?: number
+  wikiPage?: any
+  existingPage?: any
+  duplicate?: boolean
+  attachment?: any
+  error?: string
+  /** Sprint 21 US-21.4: 畀「更新同名 wiki 頁」按鈕用嘅 LLM analysis + 解析後 preview text */
+  analysis?: any
+  parsedTextPreview?: string
+  // complete
+  successful?: number
+  failed?: number
+  wikiPagesCreated?: number
+  // error
+  message?: string
+}
+
 export const documentApi = {
   parse: (formData: FormData) =>
     api.post('/documents/parse', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
-  batchParse: (formData: FormData) =>
-    api.post('/documents/batch-parse', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
+  /**
+   * Sprint 21 US-21.4:batch upload + parse,SSE 串流。
+   *
+   * 用 fetch 直接打 endpoint,Read response.body 收 SSE chunks,
+   * 每個 event 觸發 onProgress,frontend 即時更新 UI。
+   *
+   * 用 generic <T extends BatchParseProgressEvent> 畀 caller 決定點用
+   * payload 嘅 type(預設就 BatchParseProgressEvent 嘅 union)。
+   */
+  batchParseStream: async <T extends BatchParseProgressEvent = BatchParseProgressEvent>(
+    formData: FormData,
+    onProgress: (event: T) => void,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const res = await fetch(`${API_URL}/documents/batch-parse`, {
+      method: 'POST',
+      body: formData,
+      // 唔好 set Content-Type header,fetch 會自己加 boundary
+      signal,
+    })
+
+    if (!res.ok || !res.body) {
+      let errMsg = `HTTP ${res.status}`
+      try {
+        const errBody = await res.json()
+        errMsg = errBody?.error?.message || errMsg
+      } catch {
+        // 唔係 JSON,fallback
+      }
+      throw new Error(errMsg)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      // SSE 用 \n\n 分 event
+      let boundary: number
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+
+        // 抽 'data: ' 行
+        const dataLines = rawEvent
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trimStart())
+        if (dataLines.length === 0) continue
+
+        const payload = dataLines.join('\n')
+        try {
+          const event = JSON.parse(payload) as T
+          onProgress(event)
+          if (event.type === 'complete' || event.type === 'error') {
+            return
+          }
+        } catch (e) {
+          console.warn('[batchParseStream] failed to parse SSE payload:', payload, e)
+        }
+      }
+    }
+  },
 }
 
 // Agent API

@@ -6,11 +6,22 @@ import * as path from 'path'
 import * as mammoth from 'mammoth'
 import ExcelJS from 'exceljs'
 import { $ } from 'bun'
+import { randomUUID } from 'crypto'
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024
 // Sprint 21 US-21.1: add .doc (legacy Word), .xls (legacy Excel), .txt (plain text)
 const SUPPORTED_EXTENSIONS = ['.docx', '.md', '.xlsx', '.pdf', '.doc', '.xls', '.txt']
 const MAX_PROMPT_TEXT_LENGTH = 60_000
+
+/**
+ * Sprint 21: 批次上傳 queue 嘅並發上限。
+ * 設 3 嘅原因:
+ *   - 大多數 LLM provider (OpenAI / Claude / Qwen) 都有限速 RPM/TPM
+ *   - 太高並發容易觸發 429
+ *   - 3 個算 sweet spot:同時間有 progress feedback,但又唔會撞 rate limit
+ *   - 環境變數可 override(用嚟畀企業 LLM 部署調高)
+ */
+const BATCH_CONCURRENCY = Math.max(1, parseInt(process.env.DOC_BATCH_CONCURRENCY || '3', 10))
 
 type UploadedFileInfo = {
   fileName: string
@@ -371,6 +382,274 @@ async function assertProjectAccess(user: any, projectId: string) {
 }
 
 /**
+ * 處理單個 file,畀 batch endpoint 用。永遠唔 throw,失敗會返 success:false。
+ * Sprint 21 US-21.4: 抽出嚟令 batch streaming endpoint 邏輯保持線性。
+ */
+async function processSingleFileForBatch(
+  file: any,
+  projectId: string,
+  userId: string
+): Promise<{
+  name: string
+  success: boolean
+  type?: string
+  size?: number
+  wikiPage?: any
+  existingPage?: any
+  duplicate?: boolean
+  attachment?: any
+  error?: string
+}> {
+  let fileInfo: UploadedFileInfo
+  try {
+    fileInfo = await normalizeUploadedFile(file)
+  } catch (e: any) {
+    return {
+      name: file?.name || file?.filename || 'unknown',
+      success: false,
+      error: e?.message || 'Invalid file format'
+    }
+  }
+
+  if (fileInfo.fileSize > MAX_FILE_SIZE) {
+    return {
+      name: fileInfo.fileName,
+      success: false,
+      error: 'File size exceeds 50MB limit'
+    }
+  }
+
+  const ext = getExtension(fileInfo.fileName, fileInfo.mimeType)
+  if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+    return {
+      name: fileInfo.fileName,
+      success: false,
+      error: `Unsupported file type: ${ext || '(no extension)'}`
+    }
+  }
+
+  const llmConfig = await prisma.lLMConfig.findFirst()
+  if (!llmConfig) {
+    return {
+      name: fileInfo.fileName,
+      success: false,
+      error: '請先到「AI 設定」頁面配置 API Key'
+    }
+  }
+
+  const isPdfFile = ext === '.pdf'
+  let parsedText = ''
+  if (!isPdfFile) {
+    try {
+      parsedText = await parseDocument(fileInfo, ext)
+    } catch (e: any) {
+      return {
+        name: fileInfo.fileName,
+        success: false,
+        type: ext,
+        size: fileInfo.fileSize,
+        error: `解析失敗: ${e?.message || 'unknown'}`
+      }
+    }
+    if (!parsedText.trim()) {
+      return {
+        name: fileInfo.fileName,
+        success: false,
+        type: ext,
+        size: fileInfo.fileSize,
+        error: 'No text content found in document'
+      }
+    }
+  }
+
+  const llmResult = await analyzeDocumentWithLLM(
+    fileInfo.fileName,
+    parsedText,
+    isPdfFile ? fileInfo.buffer : undefined,
+    isPdfFile ? fileInfo.mimeType : undefined,
+    isPdfFile
+  )
+  const llmOutput = llmResult.raw ?? ''
+  if (llmResult.error) {
+    return {
+      name: fileInfo.fileName,
+      success: false,
+      type: ext,
+      size: fileInfo.fileSize,
+      error: llmResult.error
+    }
+  }
+
+  const structured = parseLLMJson(llmOutput)
+  const title = (structured?.title || `${path.basename(fileInfo.fileName, ext)} 文件解析`).slice(0, 200)
+  const tags = Array.isArray(structured?.tags)
+    ? Array.from(new Set([...(structured?.tags || []), 'ai-parsed', ext.slice(1)]))
+    : ['ai-parsed', ext.slice(1)]
+  const wikiContent = buildFallbackWikiContent(fileInfo.fileName, parsedText, llmOutput, structured)
+
+  // Sprint 21 US-21.3: detect duplicate within same project BEFORE creating.
+  let existingPage = null
+  if (projectId) {
+    existingPage = await findExistingWikiPage(projectId, title)
+  }
+
+  let wikiPage = null
+  let attachment = null
+  if (projectId) {
+    if (existingPage) {
+      // Skip creation — frontend will offer "更新此頁" button.
+      wikiPage = null
+    } else {
+      const lastPage = await prisma.wikiPage.findFirst({
+        where: { projectId },
+        orderBy: { order: 'desc' },
+        select: { order: true }
+      })
+      wikiPage = await prisma.wikiPage.create({
+        data: {
+          projectId,
+          title,
+          content: wikiContent,
+          tags,
+          order: (lastPage?.order ?? -1) + 1,
+          createdById: userId
+        },
+        include: {
+          createdBy: { select: { id: true, name: true } },
+          project: { select: { id: true, name: true } }
+        }
+      })
+
+      attachment = await saveFileAsWikiAttachment(fileInfo, wikiPage.id, projectId, userId)
+    }
+  }
+
+  return {
+    name: fileInfo.fileName,
+    success: true,
+    type: ext,
+    size: fileInfo.fileSize,
+    wikiPage,
+    existingPage,
+    duplicate: !!existingPage,
+    attachment,
+    // Sprint 21 US-21.4: 帶埋 LLM analysis + parsed text preview 返出去,
+    // 畀 frontend 嘅「更新同名 wiki 頁」按鈕可以拎到內容去 PUT 落 wiki
+    analysis: structured,
+    parsedTextPreview: parsedText ? truncateText(parsedText, 2_000) : undefined
+  }
+}
+
+/**
+ * Concurrency-limited runner:同時間最多 BATCH_CONCURRENCY 個 worker,
+ * 完成一個就即刻 pull 新嘅入嚟(行內 worker pool)。
+ * - 用 onFileDone 通知 caller(畀 streaming endpoint emit SSE)
+ * - 永遠 resolve,個別 file 嘅錯誤已經喺 processSingleFileForBatch 內部 swallow 咗
+ */
+async function processBatchWithConcurrency(
+  files: any[],
+  projectId: string,
+  userId: string,
+  onFileDone: (
+    result: Awaited<ReturnType<typeof processSingleFileForBatch>>,
+    index: number
+  ) => void | Promise<void>
+): Promise<void> {
+  const total = files.length
+  let nextIndex = 0
+  const workers: Promise<void>[] = []
+
+  for (let w = 0; w < Math.min(BATCH_CONCURRENCY, total); w++) {
+    workers.push((async () => {
+      while (true) {
+        const myIndex = nextIndex++
+        if (myIndex >= total) return
+        const file = files[myIndex]
+        const result = await processSingleFileForBatch(file, projectId, userId)
+        await onFileDone(result, myIndex)
+      }
+    })())
+  }
+
+  await Promise.all(workers)
+}
+
+function sseEncode(data: unknown): string {
+  return `data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`
+}
+
+/**
+ * 從 Elysia / FormData 嘅 file object 抽出標準 UploadedFileInfo
+ * (從原本 inline 喺 batch-parse 嘅 code 抽出,畀 streaming endpoint 同
+ *  helper 共用)
+ */
+async function normalizeUploadedFile(file: any): Promise<UploadedFileInfo> {
+  if (file && typeof file === 'object' && 'buffer' in file) {
+    return {
+      fileName: file.filename || file.name || 'unknown',
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: file.buffer?.length || 0,
+      buffer: file.buffer || Buffer.alloc(0)
+    }
+  }
+  if (file && typeof file === 'object' && 'path' in file) {
+    const filePath = file.path
+    const stats = fs.statSync(filePath)
+    return {
+      fileName: file.name || file.filename || 'unknown',
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: stats.size,
+      buffer: fs.readFileSync(filePath)
+    }
+  }
+  if (file && typeof file === 'object' && 'arrayBuffer' in file) {
+    const arrayBuffer = await file.arrayBuffer()
+    return {
+      fileName: file.name || file.filename || 'unknown',
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: typeof file.size === 'number' ? file.size : arrayBuffer.byteLength,
+      buffer: Buffer.from(arrayBuffer)
+    }
+  }
+  throw new Error('Invalid file format')
+}
+
+/**
+ * 把 file 落 disk 並且 prisma.attachment.create 入 wiki entity
+ * (從原本 batch-parse 嘅 try/catch 抽出,失敗唔影響 wiki page create)
+ */
+async function saveFileAsWikiAttachment(
+  fileInfo: UploadedFileInfo,
+  wikiPageId: string,
+  projectId: string,
+  userId: string
+) {
+  try {
+    const storedFilename = `${randomUUID()}${path.extname(fileInfo.fileName)}`
+    const storedPath = path.join(process.env.UPLOAD_DIR || '/app/uploads', storedFilename)
+    if (!fs.existsSync(process.env.UPLOAD_DIR || '/app/uploads')) {
+      fs.mkdirSync(process.env.UPLOAD_DIR || '/app/uploads', { recursive: true })
+    }
+    fs.writeFileSync(storedPath, fileInfo.buffer)
+    return await prisma.attachment.create({
+      data: {
+        entityType: 'wiki',
+        entityId: wikiPageId,
+        filename: fileInfo.fileName,
+        storedPath: storedFilename,
+        mimeType: fileInfo.mimeType,
+        fileSize: fileInfo.fileSize,
+        uploadedById: userId,
+        projectId
+      }
+    })
+  } catch (err) {
+    console.error('saveFileAsWikiAttachment failed:', err)
+    return null
+  }
+}
+
+/**
  * Analyze PDF by converting to images first
  */
 async function analyzePdfWithImages(
@@ -694,6 +973,21 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
   })
 
   // Batch upload and parse multiple documents
+  /**
+   * Sprint 21 US-21.4: 批量上傳 + 解析,**SSE 串流**返進度。
+   *
+   * 改動:
+   *   - 移除「最多 20 個 file」硬性限制
+   *   - 加 server-side concurrency pool(worker 數 = BATCH_CONCURRENCY,預設 3)
+   *   - 改成 Server-Sent Events,每個 file 完成即時 emit 進度事件
+   *     畀 frontend 即時 refresh,等幾十個 file 唔使呆等轉圈
+   *
+   * SSE 事件(JSON 入 data:):
+   *   { type: 'start',     total, concurrency, fileNames }
+   *   { type: 'file',      index, name, success, ... }        ← 每 file 完成
+   *   { type: 'complete',  total, successful, failed, wikiPagesCreated }
+   *   { type: 'error',     message }                            ← batch fatal
+   */
   .post('/batch-parse', async ({ body, set, user }) => {
     if (!user) {
       return errorResponse(set, 401, 'UNAUTHORIZED', 'Authentication required')
@@ -704,10 +998,8 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
     let projectId = ''
 
     if (Array.isArray(body)) {
-      // Elysia parsed it as array
       files = body
     } else if (body && typeof body === 'object') {
-      // Check if body has files array
       const b = body as any
       if (Array.isArray(b.files)) {
         files = b.files
@@ -721,10 +1013,6 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
       return errorResponse(set, 400, 'VALIDATION_ERROR', 'files array is required')
     }
 
-    if (files.length > 20) {
-      return errorResponse(set, 400, 'VALIDATION_ERROR', 'Maximum 20 files per batch')
-    }
-
     if (projectId) {
       const access = await assertProjectAccess(user, projectId)
       if (!access.ok) {
@@ -732,223 +1020,65 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
       }
     }
 
-    const results: any[] = []
-    let wikiPagesCreated = 0
+    // ── SSE 串流 setup ──────────────────────────────────────────────
+    // 每個 file 處理完 emit 一個 'file' 事件,frontend 即時更新 UI。
+    // 不再等全 batch 完成先 return。
+    const encoder = new TextEncoder()
+    const total = files.length
+    const fileNames = files.map((f: any) => f?.name || f?.filename || 'unknown')
 
-    for (const file of files) {
-      try {
-        // Create fileInfo from various file formats
-        let fileInfo: UploadedFileInfo
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (payload: unknown) => controller.enqueue(encoder.encode(sseEncode(payload)))
+        let successful = 0
+        let failed = 0
+        let wikiPagesCreatedInner = 0
 
-        if (file && typeof file === 'object' && 'buffer' in file) {
-          // Our custom format
-          fileInfo = {
-            fileName: (file as any).filename || (file as any).name || 'unknown',
-            mimeType: (file as any).type || 'application/octet-stream',
-            fileSize: (file as any).buffer?.length || 0,
-            buffer: (file as any).buffer || Buffer.alloc(0)
-          }
-        } else if (file && typeof file === 'object' && 'path' in file) {
-          // Elysia file format (temp file path)
-          const fs = await import('fs')
-          const filePath = (file as any).path
-          const stats = fs.statSync(filePath)
-          fileInfo = {
-            fileName: (file as any).name || (file as any).filename || 'unknown',
-            mimeType: (file as any).type || 'application/octet-stream',
-            fileSize: stats.size,
-            buffer: fs.readFileSync(filePath)
-          }
-        } else if (file && typeof file === 'object' && 'arrayBuffer' in file) {
-          // Browser File/Blob format
-          const arrayBuffer = await (file as any).arrayBuffer()
-          fileInfo = {
-            fileName: (file as any).name || (file as any).filename || 'unknown',
-            mimeType: (file as any).type || 'application/octet-stream',
-            fileSize: (file as any).size || arrayBuffer.byteLength,
-            buffer: Buffer.from(arrayBuffer)
-          }
-        } else {
-          throw new Error('Invalid file format')
-        }
+        try {
+          // 1) start 事件:總數 + 並發數 + filename list
+          send({ type: 'start', total, concurrency: BATCH_CONCURRENCY, fileNames })
 
-        if (fileInfo.fileSize > MAX_FILE_SIZE) {
-          results.push({
-            name: fileInfo.fileName,
-            success: false,
-            error: 'File size exceeds 50MB limit'
-          })
-          continue
-        }
-
-        const ext = getExtension(fileInfo.fileName, fileInfo.mimeType)
-        if (!SUPPORTED_EXTENSIONS.includes(ext)) {
-          results.push({
-            name: fileInfo.fileName,
-            success: false,
-            error: `Unsupported file type: ${ext}`
-          })
-          continue
-        }
-
-        // Check LLM config
-        const llmConfig = await prisma.lLMConfig.findFirst()
-        if (!llmConfig) {
-          results.push({
-            name: fileInfo.fileName,
-            success: false,
-            error: '請先到「AI 設定」頁面配置 API Key'
-          })
-          continue
-        }
-
-        const isPdfFile = ext === '.pdf'
-        let parsedText = ''
-
-        // For PDFs, we use image-based analysis (converted to images)
-        // For other files, extract text first
-        if (!isPdfFile) {
-          parsedText = await parseDocument(fileInfo, ext)
-          if (!parsedText.trim()) {
-            results.push({
-              name: fileInfo.fileName,
-              success: false,
-              error: 'No text content found in document'
-            })
-            continue
-          }
-        }
-
-        // For PDFs, fileBuffer is passed to trigger image conversion
-        // For other files, pass parsedText only
-        const llmResult = await analyzeDocumentWithLLM(
-          fileInfo.fileName,
-          parsedText,
-          isPdfFile ? fileInfo.buffer : undefined,
-          isPdfFile ? fileInfo.mimeType : undefined,
-          isPdfFile
-        )
-        const llmOutput = llmResult.raw ?? ''
-
-        if (llmResult.error) {
-          results.push({
-            name: fileInfo.fileName,
-            success: false,
-            error: llmResult.error
-          })
-          continue
-        }
-
-        const structured = parseLLMJson(llmOutput)
-        const title = (structured?.title || `${path.basename(fileInfo.fileName, ext)} 文件解析`).slice(0, 200)
-        const tags = Array.isArray(structured?.tags)
-          ? Array.from(new Set([...(structured?.tags || []), 'ai-parsed', ext.slice(1)]))
-          : ['ai-parsed', ext.slice(1)]
-        const wikiContent = buildFallbackWikiContent(fileInfo.fileName, parsedText, llmOutput, structured)
-
-        // Sprint 21 US-21.3: detect duplicate within same project BEFORE creating.
-        let existingPage = null
-        if (projectId) {
-          existingPage = await findExistingWikiPage(projectId, title)
-        }
-
-        let wikiPage = null
-        let attachment = null
-        if (projectId) {
-          if (existingPage) {
-            // Skip creation — frontend will offer "更新此頁" button.
-            wikiPage = null
-          } else {
-            const lastPage = await prisma.wikiPage.findFirst({
-              where: { projectId },
-              orderBy: { order: 'desc' },
-              select: { order: true }
-            })
-
-            wikiPage = await prisma.wikiPage.create({
-              data: {
-                projectId,
-                title,
-                content: wikiContent,
-                tags,
-                order: (lastPage?.order ?? -1) + 1,
-                createdById: user.id
-              },
-              include: {
-                createdBy: { select: { id: true, name: true } },
-                project: { select: { id: true, name: true } }
-              }
-            })
-            wikiPagesCreated++
-
-            // Also save the file as an attachment
-            try {
-              const fs = await import('fs')
-              const path = await import('path')
-              const { v4: uuidv4 } = await import('uuid')
-              const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads'
-
-              const ext = path.extname(fileInfo.fileName)
-              const storedFilename = `${uuidv4()}${ext}`
-              const storedPath = path.join(UPLOAD_DIR, storedFilename)
-
-              // Ensure upload directory exists
-              if (!fs.existsSync(UPLOAD_DIR)) {
-                fs.mkdirSync(UPLOAD_DIR, { recursive: true })
-              }
-
-              // Write file to disk
-              fs.writeFileSync(storedPath, fileInfo.buffer)
-
-              // Create attachment record
-              attachment = await prisma.attachment.create({
-                data: {
-                  entityType: 'wiki',
-                  entityId: wikiPage.id,
-                  filename: fileInfo.fileName,
-                  storedPath: storedFilename,
-                  mimeType: fileInfo.mimeType,
-                  fileSize: fileInfo.fileSize,
-                  uploadedById: user.id,
-                  projectId
-                }
-              })
-            } catch (attachmentError) {
-              console.error('Failed to create attachment:', attachmentError)
-              // Don't fail the whole operation if attachment creation fails
+          // 2) worker pool 並發處理
+          await processBatchWithConcurrency(files, projectId, user.id, async (result, index) => {
+            if (result.success) {
+              successful++
+              if (result.wikiPage) wikiPagesCreatedInner++
+            } else {
+              failed++
             }
-          }
+            // 'result.type' 係 file extension 嗰個 string,同 SSE event type 撞名,
+            // 改用 fileType alias 傳出去畀 frontend
+            const { type: _ext, ...rest } = result
+            send({ type: 'file', index, ...rest, fileType: _ext })
+          })
+
+          // 3) complete 事件:總結
+          send({
+            type: 'complete',
+            total,
+            successful,
+            failed,
+            wikiPagesCreated: wikiPagesCreatedInner
+          })
+        } catch (err: any) {
+          console.error('[batch-parse] stream error:', err)
+          send({ type: 'error', message: err?.message || 'batch processing failed' })
+        } finally {
+          controller.close()
         }
-
-        results.push({
-          name: fileInfo.fileName,
-          success: true,
-          type: ext,
-          size: fileInfo.fileSize,
-          wikiPage,
-          existingPage,
-          duplicate: !!existingPage,
-          attachment
-        })
-      } catch (error) {
-        console.error('Batch parse error:', error)
-        const fileName = (file as any)?.name || (file as any)?.filename || 'unknown'
-        results.push({
-          name: fileName,
-          success: false,
-          error: `${fileName}: ${error instanceof Error ? error.message : 'Processing failed'}`
-        })
       }
+    })
+
+    set.headers = {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      // nginx buffering 預設開啟,會 hold 住 SSE chunks 等夠大先 flush
+      // → disable 確保 frontend 即時收到 progress
+      'X-Accel-Buffering': 'no',
+      'Connection': 'keep-alive'
     }
 
-    return {
-      success: true,
-      total: files.length,
-      successful: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length,
-      wikiPagesCreated,
-      results
-    }
+    return new Response(stream, { status: 200 })
   })
 
 export { documentRoutes }

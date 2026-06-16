@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Search, Plus, FileText, Tag, ChevronRight, X, Upload, CheckCircle, AlertCircle } from 'lucide-react'
-import { documentApi } from '../utils/api'
+import { Search, Plus, FileText, Tag, ChevronRight, X, Upload, CheckCircle, AlertCircle, Clock, Loader2 } from 'lucide-react'
+import { documentApi, type BatchParseProgressEvent } from '../utils/api'
 
 interface WikiPage {
   id: string
@@ -108,14 +108,31 @@ export default function WikiPage() {
     formData.append('projectId', selectedProject)
 
     try {
-      const res = await documentApi.batchParse(formData)
-      setBatchResults(res.data.results || [])
-      if (res.data.wikiPagesCreated > 0) {
-        fetchPages()
-      }
-    } catch (err) {
+      // Sprint 21 US-21.4: SSE 串流,每 file 完成即時 push 入 batchResults
+      await documentApi.batchParseStream(
+        formData,
+        (event: BatchParseProgressEvent) => {
+          if (event.type === 'file') {
+            // 攤平 SSE 嗰個 file event 入 batchResults
+            const { type: _evType, fileType, index, ...rest } = event as any
+            setBatchResults((prev) => {
+              // 用 index 做 stable key,避免 race
+              const next = [...prev]
+              next[index ?? next.length] = { ...rest, fileType }
+              return next
+            })
+          } else if (event.type === 'complete') {
+            if ((event.wikiPagesCreated || 0) > 0) {
+              fetchPages()
+            }
+          } else if (event.type === 'error') {
+            setBatchResults([{ name: '批次錯誤', success: false, error: event.message || 'unknown' }])
+          }
+        }
+      )
+    } catch (err: any) {
       console.error('Batch upload failed:', err)
-      setBatchResults([{ name: '上傳失敗', success: false, error: '上傳過程中發生錯誤' }])
+      setBatchResults([{ name: '上傳失敗', success: false, error: err?.message || '上傳過程中發生錯誤' }])
     } finally {
       setBatchUploading(false)
     }
@@ -228,7 +245,7 @@ export default function WikiPage() {
           <div className="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
             <p className="font-medium text-blue-800 mb-1">支援格式</p>
             <p className="text-blue-700">PDF、Word (.docx / .doc)、Excel (.xlsx / .xls)、Markdown (.md)、純文字 (.txt)</p>
-            <p className="text-blue-600 mt-1">最多 20 個文件，每個最大 50MB</p>
+            <p className="text-blue-600 mt-1">檔案數量無上限(每個最大 50MB),server 會以並發排隊處理</p>
             <p className="text-blue-600 mt-1 text-xs">ℹ️ 同一項目內已有同名 Wiki 時,會自動偵測並提示您確認是否更新</p>
           </div>
           <div className="mb-4">
@@ -315,8 +332,8 @@ export default function WikiPage() {
             >
               {batchUploading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                  處理中...
+                  <Loader2 size={16} className="animate-spin" />
+                  處理中... ({batchResults.length}/{batchFiles.length})
                 </>
               ) : (
                 <>
