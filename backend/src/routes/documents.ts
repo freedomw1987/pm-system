@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia'
 import { prisma } from '../utils/prisma'
+import { findExistingWikiPage } from '../utils/wiki-dedup'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as mammoth from 'mammoth'
@@ -7,7 +8,8 @@ import ExcelJS from 'exceljs'
 import { $ } from 'bun'
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024
-const SUPPORTED_EXTENSIONS = ['.docx', '.md', '.xlsx', '.pdf']
+// Sprint 21 US-21.1: add .doc (legacy Word), .xls (legacy Excel), .txt (plain text)
+const SUPPORTED_EXTENSIONS = ['.docx', '.md', '.xlsx', '.pdf', '.doc', '.xls', '.txt']
 const MAX_PROMPT_TEXT_LENGTH = 60_000
 
 type UploadedFileInfo = {
@@ -106,10 +108,12 @@ function getExtension(fileName: string, mimeType?: string) {
   const mimeToExt: Record<string, string> = {
     'text/markdown': '.md',
     'text/x-markdown': '.md',
-    'text/plain': '.md',
+    'text/plain': '.txt',
+    'application/msword': '.doc',
+    'application/vnd.ms-word': '.doc',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/vnd.ms-excel': '.xls',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
-    'application/vnd.ms-excel': '.xlsx',
     'application/pdf': '.pdf'
   }
   return mimeToExt[mimeType || ''] || ''
@@ -145,7 +149,7 @@ async function readUploadedFile(file: any): Promise<UploadedFileInfo> {
 }
 
 async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
-  if (ext === '.md') {
+  if (ext === '.md' || ext === '.txt') {
     return fileInfo.buffer.toString('utf-8')
   }
 
@@ -155,6 +159,36 @@ async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
     return warnings.length > 0
       ? `${result.value}\n\n[解析警告]\n${warnings.map((w: string) => `- ${w}`).join('\n')}`
       : result.value
+  }
+
+  if (ext === '.doc') {
+    // Sprint 21 US-21.1: legacy .doc (Word 97-2003) via `antiword` native binary.
+    // Why not SheetJS xlsx? — npm `xlsx` is permanently stuck at 0.18.5 (Prototype
+    // Pollution + ReDoS, see REGRESSION-GUARD.md). Native `antiword` is CVE-free,
+    // Alpine has the package, no npm audit failure.
+    // catdoc is a fallback in case antiword's Word 6/95 dialect detection fails.
+    const tmpPath = `/tmp/wiki_doc_${Date.now()}_${Math.random().toString(36).slice(2)}.doc`
+    try {
+      await fs.promises.writeFile(tmpPath, fileInfo.buffer)
+      let text = ''
+      try {
+        const proc = await $`antiword -m UTF-8.txt ${tmpPath}`.text()
+        text = proc
+      } catch (antiwordErr) {
+        console.log('[Document Parse] antiword failed, falling back to catdoc:', antiwordErr)
+        const proc = await $`catdoc -d utf-8 ${tmpPath}`.text()
+        text = proc
+      }
+      const body = (text || '').trim()
+      if (!body) {
+        throw new Error('legacy .doc 文件解析後為空,請用 .docx 重試')
+      }
+      return body
+    } catch (e: any) {
+      throw new Error(`legacy .doc 解析失敗 (${e?.message || 'unknown'}):請用 .docx 重試`)
+    } finally {
+      await fs.promises.unlink(tmpPath).catch(() => {})
+    }
   }
 
   if (ext === '.xlsx') {
@@ -193,6 +227,48 @@ async function parseDocument(fileInfo: UploadedFileInfo, ext: string) {
     })
 
     return sheetTexts.join('\n\n')
+  }
+
+  if (ext === '.xls') {
+    // Sprint 21 US-21.1: legacy .xls (Excel 97-2003 BIFF8) via `xls2csv` native binary
+    // (part of the `xls2csv` Perl package, available in Alpine via apk).
+    // Falls back to LibreOffice `ssconvert` if xls2csv fails on modern .xls
+    // variants. Why not SheetJS xlsx? — npm `xlsx` is permanently 0.18.5
+    // (CVE-2023-30533 Prototype Pollution + CVE-2024-22363 ReDoS, see
+    // REGRESSION-GUARD.md). Native binary path is CVE-free.
+    const tmpPath = `/tmp/wiki_xls_${Date.now()}_${Math.random().toString(36).slice(2)}.xls`
+    try {
+      await fs.promises.writeFile(tmpPath, fileInfo.buffer)
+      const sheetTexts: string[] = []
+      // xls2csv prints all sheets on stdout, one per line block separated by
+      // a blank line. We then ask user to use --sheet if needed; here we take
+      // the whole CSV as a single block to keep the parser simple.
+      let csv = ''
+      try {
+        csv = await $`xls2csv -q 0 -d utf-8 ${tmpPath}`.text()
+      } catch (xlsErr) {
+        console.log('[Document Parse] xls2csv failed, falling back to ssconvert:', xlsErr)
+        // ssconvert outputs ALL sheets concatenated, prefixed with sheet name
+        // when given multiple file args. Here we just want the whole CSV.
+        const stdoutPath = `/tmp/wiki_xls_out_${Date.now()}.csv`
+        try {
+          await $`ssconvert --export-type=Gnumeric_Excel:csv -O "separator=," ${tmpPath} ${stdoutPath}`.text()
+          csv = await fs.promises.readFile(stdoutPath, 'utf-8')
+        } finally {
+          await fs.promises.unlink(stdoutPath).catch(() => {})
+        }
+      }
+      const body = (csv || '').trim()
+      if (!body) {
+        throw new Error('legacy .xls 文件解析後為空,請用 .xlsx 重試')
+      }
+      sheetTexts.push(`## Sheet (legacy xls)\n${body}`)
+      return sheetTexts.join('\n\n')
+    } catch (e: any) {
+      throw new Error(`legacy .xls 解析失敗 (${e?.message || 'unknown'}):請用 .xlsx 重試`)
+    } finally {
+      await fs.promises.unlink(tmpPath).catch(() => {})
+    }
   }
 
   if (ext === '.pdf') {
@@ -557,6 +633,14 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
       : ['ai-parsed', ext.slice(1)]
     const wikiContent = buildFallbackWikiContent(fileInfo.fileName, parsedText, llmOutput, structured)
 
+    // Sprint 21 US-21.3: detect duplicate within same project BEFORE creating.
+    // Frontend can then prompt user to either keep the existing page or
+    // re-upload with `replaceId` to update its content.
+    let existingPage = null
+    if (projectId) {
+      existingPage = await findExistingWikiPage(projectId, title)
+    }
+
     let wikiPage = null
     if (projectId) {
       const lastPage = await prisma.wikiPage.findFirst({
@@ -565,6 +649,11 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
         select: { order: true }
       })
 
+      // If duplicate exists, return `existingPage` and DON'T auto-create.
+      // Frontend decides whether to call PUT /wikis/:id to update.
+      if (existingPage) {
+        wikiPage = null
+      } else {
         wikiPage = await prisma.wikiPage.create({
           data: {
             projectId,
@@ -580,21 +669,25 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           }
         })
       }
+    }
 
-      return {
-        success: true,
-        file: {
-          name: fileInfo.fileName,
-          size: fileInfo.fileSize,
-          type: ext
-        },
-        parsedTextPreview: truncateText(parsedText, 2_000),
-        analysis: structured || { raw: llmOutput },
-        wikiPage,
-        message: projectId
-          ? 'Document parsed, analyzed by LLM, and WikiPage created.'
-          : 'Document parsed and analyzed by LLM. Provide projectId to create a WikiPage automatically.'
-      }
+    return {
+      success: true,
+      file: {
+        name: fileInfo.fileName,
+        size: fileInfo.fileSize,
+        type: ext
+      },
+      parsedTextPreview: truncateText(parsedText, 2_000),
+      analysis: structured || { raw: llmOutput },
+      wikiPage,
+      existingPage,
+      message: existingPage
+        ? '偵測到同項目內已有同名 Wiki 頁面,請確認是否要更新內容。'
+        : projectId
+        ? 'Document parsed, analyzed by LLM, and WikiPage created.'
+        : 'Document parsed and analyzed by LLM. Provide projectId to create a WikiPage automatically.'
+    }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Document parsing failed'
       return errorResponse(set, 500, 'DOCUMENT_PARSE_FAILED', message)
@@ -754,66 +847,77 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           : ['ai-parsed', ext.slice(1)]
         const wikiContent = buildFallbackWikiContent(fileInfo.fileName, parsedText, llmOutput, structured)
 
+        // Sprint 21 US-21.3: detect duplicate within same project BEFORE creating.
+        let existingPage = null
+        if (projectId) {
+          existingPage = await findExistingWikiPage(projectId, title)
+        }
+
         let wikiPage = null
         let attachment = null
         if (projectId) {
-          const lastPage = await prisma.wikiPage.findFirst({
-            where: { projectId },
-            orderBy: { order: 'desc' },
-            select: { order: true }
-          })
+          if (existingPage) {
+            // Skip creation — frontend will offer "更新此頁" button.
+            wikiPage = null
+          } else {
+            const lastPage = await prisma.wikiPage.findFirst({
+              where: { projectId },
+              orderBy: { order: 'desc' },
+              select: { order: true }
+            })
 
-          wikiPage = await prisma.wikiPage.create({
-            data: {
-              projectId,
-              title,
-              content: wikiContent,
-              tags,
-              order: (lastPage?.order ?? -1) + 1,
-              createdById: user.id
-            },
-            include: {
-              createdBy: { select: { id: true, name: true } },
-              project: { select: { id: true, name: true } }
-            }
-          })
-          wikiPagesCreated++
-
-          // Also save the file as an attachment
-          try {
-            const fs = await import('fs')
-            const path = await import('path')
-            const { v4: uuidv4 } = await import('uuid')
-            const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads'
-
-            const ext = path.extname(fileInfo.fileName)
-            const storedFilename = `${uuidv4()}${ext}`
-            const storedPath = path.join(UPLOAD_DIR, storedFilename)
-
-            // Ensure upload directory exists
-            if (!fs.existsSync(UPLOAD_DIR)) {
-              fs.mkdirSync(UPLOAD_DIR, { recursive: true })
-            }
-
-            // Write file to disk
-            fs.writeFileSync(storedPath, fileInfo.buffer)
-
-            // Create attachment record
-            attachment = await prisma.attachment.create({
+            wikiPage = await prisma.wikiPage.create({
               data: {
-                entityType: 'wiki',
-                entityId: wikiPage.id,
-                filename: fileInfo.fileName,
-                storedPath: storedFilename,
-                mimeType: fileInfo.mimeType,
-                fileSize: fileInfo.fileSize,
-                uploadedById: user.id,
-                projectId
+                projectId,
+                title,
+                content: wikiContent,
+                tags,
+                order: (lastPage?.order ?? -1) + 1,
+                createdById: user.id
+              },
+              include: {
+                createdBy: { select: { id: true, name: true } },
+                project: { select: { id: true, name: true } }
               }
             })
-          } catch (attachmentError) {
-            console.error('Failed to create attachment:', attachmentError)
-            // Don't fail the whole operation if attachment creation fails
+            wikiPagesCreated++
+
+            // Also save the file as an attachment
+            try {
+              const fs = await import('fs')
+              const path = await import('path')
+              const { v4: uuidv4 } = await import('uuid')
+              const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads'
+
+              const ext = path.extname(fileInfo.fileName)
+              const storedFilename = `${uuidv4()}${ext}`
+              const storedPath = path.join(UPLOAD_DIR, storedFilename)
+
+              // Ensure upload directory exists
+              if (!fs.existsSync(UPLOAD_DIR)) {
+                fs.mkdirSync(UPLOAD_DIR, { recursive: true })
+              }
+
+              // Write file to disk
+              fs.writeFileSync(storedPath, fileInfo.buffer)
+
+              // Create attachment record
+              attachment = await prisma.attachment.create({
+                data: {
+                  entityType: 'wiki',
+                  entityId: wikiPage.id,
+                  filename: fileInfo.fileName,
+                  storedPath: storedFilename,
+                  mimeType: fileInfo.mimeType,
+                  fileSize: fileInfo.fileSize,
+                  uploadedById: user.id,
+                  projectId
+                }
+              })
+            } catch (attachmentError) {
+              console.error('Failed to create attachment:', attachmentError)
+              // Don't fail the whole operation if attachment creation fails
+            }
           }
         }
 
@@ -823,6 +927,8 @@ const documentRoutes = new Elysia({ prefix: '/documents' })
           type: ext,
           size: fileInfo.fileSize,
           wikiPage,
+          existingPage,
+          duplicate: !!existingPage,
           attachment
         })
       } catch (error) {
