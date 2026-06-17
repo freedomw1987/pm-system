@@ -57,6 +57,11 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
       NODE_ENV: production
       PORT: "4000"
+      # LLM call timeout (default 180s, see backend/src/routes/documents.ts)。
+      # PDF 上傳走 image base64,PROD 慢網可能要 60-120s,
+      # 預設 180s 提供 1.5x buffer。
+      # 用戶可以喺 .env override: LLM_TIMEOUT_MS=300000
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
     networks:
       - pm-net
     healthcheck:

@@ -23,21 +23,28 @@ const MAX_PROMPT_TEXT_LENGTH = 60_000
  *   - browser fetch throw \`upstream prematurely closed\` 之後無完整 body
  *   - 對 user: 個 file 永遠 hanging,UI 唔知 fail 咗
  *
- * 設 60s (1 分鐘):
- *   - 短過 nginx proxy_read_timeout 600s
- *   - LLM call 通常 5-30s,60s 已經超寬
- *   - 對 LLM server 死 / 唔存在 model 嘅情況(真實 cause),user 1 分鐘
- *     內就見到 error 結果,backend 寫 DB 仲可以 emit file:error event
- *   - 短過一般 user 嘅耐心(2-3 分鐘),user 唔會 refresh 然後見到
- *     'upstream prematurely closed'
- *   - 環境變數可 override: \`LLM_TIMEOUT_MS\` (e.g. 180000 for slow model)
+ * 設 180s (3 分鐘):
+ *   - 短過 nginx proxy_read_timeout 600s(生產:`frontend/nginx.conf.template:80`)
+ *   - 一般 LLM text call 5-30s;PDF call(image base64 上傳 + LLM OCR/理解)
+ *     喺 PROD 慢網情況可能 60-120s,180s 提供 1.5x buffer
+ *   - 比 chat.ts 嘅 120s 略高 — PDF 係最重嘅 payload(image encode + 傳輸),
+ *     唔可以短過 chat
+ *   - 對 LLM server 死 / 唔存在 model 嘅情況,user 3 分鐘內見到 error
+ *   - 短過一般 user 嘅耐心(用戶 unbackground tab 嘅時間通常 5-10 分鐘),
+ *     唔會撞 nginx 600s 之後嘅 silent fail
+ *   - 環境變數可 override: \`LLM_TIMEOUT_MS\` (e.g. 300000 for very slow model)
+ *     用戶可以喺 deploy/.env 設,自動經 docker-compose inject 入 container
  *
  * Trigger scenario: \`openai/gpt-5.5\` (fake model name) 之後 — 之前
  * 4 分鐘 timeout 都仲未返,user 28 秒就 refresh browser → controller
  * closed → backend safeSend 永遠 silent drop error。1 分鐘 timeout
  * 之後 backend 寫 error result,user 仲喺度等嘅 session 收到 event。
+ *
+ * Sprint 2 PROD hotfix (2026-06-17): 60s → 180s — PROD 客戶機網速慢,
+ * 50MB PDF × 多頁 base64 上傳 LLM 撞 60s 提前 abort;localhost 因為
+ * 同一 LAN 唔會撞。3 分鐘提供足夠 buffer,仍然 well under nginx 600s。
  */
-const LLM_TIMEOUT_MS = Math.max(10_000, parseInt(process.env.LLM_TIMEOUT_MS || '60000', 10))
+const LLM_TIMEOUT_MS = Math.max(10_000, parseInt(process.env.LLM_TIMEOUT_MS || '180000', 10))
 
 /**
  * Sprint 21: 批次上傳 queue 嘅並發上限。
