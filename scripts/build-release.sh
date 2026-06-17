@@ -53,9 +53,21 @@ echo " Version: $VERSION"
 echo " Output:  $DIST_DIR"
 echo "============================================================"
 
-# ── 檢查 Docker buildx ──────────────────────────────────────
+# ── 檢查 Docker buildx + save --platform (Docker 27+) + jq ─────
 if ! docker buildx version >/dev/null 2>&1; then
   echo "❌ 需要 docker buildx"
+  exit 1
+fi
+if ! docker save --help 2>&1 | grep -q -- '--platform'; then
+  echo "❌ docker save 缺少 --platform flag,需要 Docker 27+"
+  echo "   你嘅版本: $(docker version --format '{{.Server.Version}}')"
+  exit 1
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  echo "❌ 缺少 jq"
+  echo "   macOS:   brew install jq"
+  echo "   Ubuntu:  sudo apt-get install -y jq"
+  echo "   Alpine:  apk add jq"
   exit 1
 fi
 
@@ -96,29 +108,61 @@ build_one backend  linux/amd64 amd64
 build_one backend  linux/arm64 arm64
 
 # ── Pull 2: 抽 external image 落 tarball (客戶機拉唔到,build 環境預先 bundle) ─
-# 用 docker pull --platform 攞對應 arch 嘅 image
-# 然後 re-tag 做 pm-system-{service}:$VERSION-$SUFFIX 保持命名一致
-# 注意:第 2 次 pull 會覆蓋本地 $IMAGE tag,所以每次 pull 完要即刻 re-tag
+# ⚠️ Multi-arch 陷阱:`docker pull --platform=linux/amd64 postgres:15-alpine`
+#    落嘅其實係**成個 multi-arch manifest list + 淨係 amd64 嘅 blobs**;
+#    第二次 `docker pull --platform=linux/arm64` 會直接 "Image is up to date"
+#    (manifest list 已 cache),**唔會** 再 pull arm64 嘅 blobs。
+#    之後 `docker save` 行成個 multi-arch tree 就會搵唔到 arm64 sub-manifest 嘅 blob。
+#
+# 修法:
+#  1. 用 `docker buildx imagetools inspect --raw | jq` 攞 platform-specific digest
+#  2. `docker pull <digest>` 強制 download 該 sub-image 嘅 blobs (digest pull 唔會被 cache)
+#  3. `docker save --platform=...` (Docker 27+) 直接 export 單一 platform tarball,
+#     唔使行成個 multi-arch tree
+#
+# Single-arch image (eg. mysql:8.0 if 改成 single-arch) 就 fallback 返舊路徑。
 pull_external() {
   local IMAGE="$1"        # e.g. postgres:15-alpine
   local SERVICE="$2"      # e.g. postgres
   local PLATFORM="$3"     # e.g. linux/amd64
   local SUFFIX="$4"       # e.g. amd64
 
-  local TAG="pm-system-${SERVICE}:${VERSION}-${SUFFIX}"
   local TAR="$DIST_DIR/pm-system-${SERVICE}-${VERSION}-${SUFFIX}.tar"
 
   echo ""
-  echo "→ Pull $IMAGE for $PLATFORM (will re-tag: $TAG)"
+  echo "→ Pull $IMAGE for $PLATFORM → save to $TAR"
 
-  # Pull 對應 arch(對 multi-arch image 都 work)
-  docker pull --platform="$PLATFORM" "$IMAGE"
+  local ARCH="${PLATFORM##*/}"  # linux/amd64 → amd64
 
-  # 即刻 re-tag,免得第 2 次 pull 覆蓋咗
-  docker tag "$IMAGE" "$TAG"
+  # 判斷係 multi-arch 定 single-arch
+  local MEDIA_TYPE
+  MEDIA_TYPE="$(docker buildx imagetools inspect --raw "$IMAGE" 2>/dev/null | jq -r '.mediaType // empty')"
 
-  echo "→ Save $TAG → $TAR"
-  docker save -o "$TAR" "$TAG"
+  if [[ "$MEDIA_TYPE" == *".image.index.v1+json" || "$MEDIA_TYPE" == *".manifest.list.v2+json" ]]; then
+    # ── Multi-arch path ──
+    # 攞該 platform 嘅 sub-image digest
+    local DIGEST
+    if ! DIGEST="$(docker buildx imagetools inspect --raw "$IMAGE" | \
+        jq -er --arg arch "$ARCH" \
+        '.manifests[] | select(.platform.architecture == $arch and .platform.os == "linux") | .digest')"; then
+      echo "❌ 攞唔到 $IMAGE 嘅 $PLATFORM digest"
+      exit 1
+    fi
+
+    echo "  $PLATFORM digest: $DIGEST"
+
+    # Pull by <image>@<digest>: 確保呢個 platform 嘅 blobs 真係落 local daemon
+    # (用 bare digest `docker pull $DIGEST` 會被當做 docker.io/sha256 撞 401)
+    docker pull "${IMAGE}@${DIGEST}"
+
+    # Save 單一 platform tarball(--platform 直接 export,Docker 27+ flag)
+    docker save --platform="$PLATFORM" -o "$TAR" "$IMAGE"
+  else
+    # ── Single-arch fallback ──
+    docker pull --platform="$PLATFORM" "$IMAGE"
+    docker save -o "$TAR" "$IMAGE"
+  fi
+
   echo "  ✓ $(du -h "$TAR" | cut -f1)"
 }
 

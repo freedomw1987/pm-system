@@ -71,4 +71,11 @@ ENV PORT=4000
 
 EXPOSE 4000
 
+# VOLUME hint 提示 /app/uploads 係 designed-to-persist 嘅路徑。
+# 客戶 deploy 用 named volume(`pm-system-uploads` 由 deploy/docker-compose.client.yml
+# mount 落呢度)會 override 呢個 anonymous volume。對 `docker run` 嘅 user 嚟講
+# 呢個 hint 至少令佢哋知 uploads 唔應該係 ephemeral。
+# 對應:deploy/docker-compose.client.yml 嘅 `pm-system-uploads:/app/uploads` mount。
+VOLUME ["/app/uploads"]
+
 CMD ["bun", "src/index.ts"]

@@ -51,6 +51,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      # ⚠️ 持久化 wiki / attachment 上傳嘅原始 file
+      # 唔掛呢個 volume → container recreate 嗰陣(file 喺 container
+      # writable layer 唔會跟去新 container)Attachment row 變 orphan。
+      # 對應 install.sh / README。
+      - pm-system-uploads:/app/uploads
     environment:
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 必填(見 install.sh)}
@@ -115,6 +121,13 @@ services:
 volumes:
   postgres_data:
     name: pm-system-postgres-data
+  # Wiki / attachment 原始 file 嘅持久化 volume。
+  # 對應 backend:/app/uploads bind mount,file 喺 named volume 唔會跟
+  # container recreate 走。PostgreSQL 嘅 WikiPage.content(LLM 整理過嘅
+  # Markdown)依然喺 postgres_data,呢個 volume 淨係救返「原始 file」
+  # (eg. 上傳嘅 PDF source),客戶睇 wiki 文字內容冇影響。
+  pm-system-uploads:
+    name: pm-system-uploads
 
 networks:
   pm-net:

@@ -238,6 +238,32 @@ docker image inspect "pm-system-postgres:$VERSION"  >/dev/null \
 # ── 5. 啟動 ──────────────────────────────────────────────────
 step "6/8 啟動 containers"
 
+# ── 確保 pm-system-uploads named volume 存在 ──
+# 用嚟 persist wiki / attachment 上傳嘅原始 file(PDF、DOCX、...)。
+# 對應 deploy/docker-compose.client.yml 嘅 backend:/app/uploads bind mount。
+#
+# docker compose up -d 理論上會 auto-create named volume(由 compose file 定義),
+# 但呢個 explicit check 係為咗:
+#   1) 客戶升級時見到明確 message 知道自己嘅 file 從此會 persist
+#   2) 防 compose 自動創建失敗(eg. perm / 已經有同名但唔啱嘅 volume)
+#
+# ⚠️ 重要:呢個 volume 唔會 backfill 之前已遺失嘅 file。
+# 升級前嘅 wiki 上傳 file 原本喺舊 container 嘅 writable layer,
+# 隨 container recreate 已經冇咗。呢個 volume 保障「由今次安裝之後嘅
+# 新上傳」先會 persist。已喺 PostgreSQL 嘅 WikiPage.content
+# (LLM 整理過嘅 Markdown)依然喺 postgres_data,呢個 volume 淨係救返
+# 「原始 file」(eg. 上傳嘅 PDF source),客戶睇 wiki 文字內容冇影響。
+step "→ Ensure pm-system-uploads volume"
+if docker volume inspect pm-system-uploads >/dev/null 2>&1; then
+  ok "pm-system-uploads volume 已經存在(任何之前已喺呢個 volume 嘅 file 都會保留)"
+else
+  if docker volume create pm-system-uploads >/dev/null; then
+    ok "pm-system-uploads volume 建立成功(wiki / attachment 上傳從此會 persist 跨 container recreate)"
+  else
+    fail "建立 pm-system-uploads volume 失敗(檢查 docker perm)"
+  fi
+fi
+
 docker compose \
   -f docker-compose.client.yml \
   --env-file .env \
@@ -320,6 +346,13 @@ cat <<EOF
 
   憑證:  ${CERT_INFO}
   詳情:  openssl x509 -in ${CERT_FILE} -noout -subject -dates -ext subjectAltName
+
+  持久化 volumes(都會 survive 跨 container recreate / 升級):
+    pm-system-postgres-data   — PostgreSQL 資料(用戶、項目、Wiki 文字內容)
+    pm-system-uploads         — Wiki / attachment 原始 file(PDF、DOCX、...)
+    查:    docker volume ls | grep pm-system
+    備份:  docker run --rm -v pm-system-postgres-data:/from -v \$(pwd):/to alpine \
+             tar czf /to/pm-system-postgres-data.tar.gz -C /from .
 
   常用指令:
     docker compose -p pm-system ps           # 睇 status

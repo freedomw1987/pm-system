@@ -23,6 +23,7 @@ import { tokenLogRoutes } from './routes/tokenlogs'
 import { agentWebSocketRoutes, agentManagementRoutes, agentHealthRoutes } from './agent/runtime'
 import { PrismaClient } from '@prisma/client'
 import { prisma } from './utils/prisma'
+import { checkAttachmentIntegrity, logAttachmentIntegrity } from './utils/attachment-integrity'
 
 // ─── Role permissions loader (RG-007 fix) ─────────────────────────────────────
 // No in-memory cache — RBAC changes take effect immediately for all users.
@@ -117,6 +118,21 @@ const app = new Elysia()
 
 // Warm up cache at startup
 refreshAllRolePermissions().catch(console.error)
+
+// v1.0.7 hotfix: surface pre-existing attachment file loss at startup.
+// Runs async / non-blocking — server keeps listening. Scan is O(N) over
+// the Attachment table; on a typical PM deployment (hundreds to low
+// thousands of attachments) completes in < 100ms. See
+// src/utils/attachment-integrity.ts for full context on why this
+// exists (pre-v1.0.7 deployments lost files on every container
+// recreate because /app/uploads had no volume mount).
+checkAttachmentIntegrity()
+  .then(logAttachmentIntegrity)
+  .catch((err) => {
+    // Don't let a check failure crash startup — the server is already
+    // listening. Just log so the operator knows the check itself broke.
+    console.error('[attachment-integrity] check failed:', err?.message || err)
+  })
 
 // TD-010: Structured startup logs
 if (process.env.NODE_ENV === 'production' || process.env.JSON_LOGS === 'true') {
