@@ -127,6 +127,7 @@ pull_external() {
   local PLATFORM="$3"     # e.g. linux/amd64
   local SUFFIX="$4"       # e.g. amd64
 
+  local TAG="pm-system-${SERVICE}:${VERSION}-${SUFFIX}"
   local TAR="$DIST_DIR/pm-system-${SERVICE}-${VERSION}-${SUFFIX}.tar"
 
   echo ""
@@ -155,11 +156,20 @@ pull_external() {
     # (用 bare digest `docker pull $DIGEST` 會被當做 docker.io/sha256 撞 401)
     docker pull "${IMAGE}@${DIGEST}"
 
+    # Re-tag 做 pm-system-{service}:{VERSION}-{SUFFIX} → 對齊 install.sh 期望。
+    # 唔 re-tag 嘅話 tar 入面只有 postgres:15-alpine 呢個 source tag,
+    # install.sh 嘅 `docker tag pm-system-postgres:v1.0.6-amd64 ...` 會
+    # `No such image` 死。
+    docker tag "$IMAGE" "$TAG"
+
     # Save 單一 platform tarball(--platform 直接 export,Docker 27+ flag)
-    docker save --platform="$PLATFORM" -o "$TAR" "$IMAGE"
+    # 注意:用 $TAG 唔係 $IMAGE — 後者會將 RepoTag 設成 postgres:15-alpine,
+    # install.sh 嘅 re-tag step 會搵唔到 pm-system-postgres:v1.0.6-amd64
+    docker save --platform="$PLATFORM" -o "$TAR" "$TAG"
   else
     # ── Single-arch fallback ──
     docker pull --platform="$PLATFORM" "$IMAGE"
+    docker tag "$IMAGE" "$TAG"
     docker save -o "$TAR" "$IMAGE"
   fi
 
