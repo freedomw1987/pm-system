@@ -9,24 +9,15 @@ import { computePagination } from '../utils/pagination'
 const userSelect = { id: true, name: true, email: true, isAgent: true }
 
 /**
- * 2026-06-10 RG-015: developer 即使有 `tasks.edit` perm 都只可改 status。
- * 改 title / description / assignee / parentTaskId / estimatedHours 一定要
- * admin / tech_lead / 通過其他 role override / 有額外 perm `tasks.edit_fields`。
+ * Task field edit gate.
  *
- * 純 function,test 喺 `tasks.test.ts` `canEditTaskFields` describe 入面。
- *   - admin → true
- *   - tech_lead → true
- *   - 其他有 `tasks.edit_fields` perm → true
- *   - 任何其他 role(包括 developer) → false
- *
- * 注:developer 嘅 default permissions 已經有 `tasks.edit`(permissive perm name),
- * 但呢個 perm 嘅語義只覆蓋 status update(同 Kanban drag-drop 對齊),
- * 唔覆蓋 fields edit。如果想 future 畀 developer 改 fields,加 `tasks.edit_fields` perm
- * 入 developer role 嘅 default permission list(可逆 operation)。
+ * `tasks.edit` now means the user can save the edit task modal fields.
+ * `tasks.edit_fields` is kept as a backward-compatible override for custom roles.
  */
 export function canEditTaskFields(user: { role?: string; permissions?: string[] } | null | undefined): boolean {
   if (!user) return false
   if (user.role === 'admin' || user.role === 'tech_lead') return true
+  if (user.permissions?.includes('tasks.edit')) return true
   if (user.permissions?.includes('tasks.edit_fields')) return true
   return false
 }
@@ -303,30 +294,22 @@ const taskRoutes = new Elysia({ prefix: '/tasks' })
       }
     }
 
-    // Check permission: tasks.edit OR admin/tech_lead for backward compat
-    // 2026-06-10 RG-015: 改用 field-level gate — developer 即使有 tasks.edit perm
-    // 都只可改 status,其他 field(title / description / assignee / ...) 一定要
-    // admin / tech_lead / has tasks.edit_fields perm
-    //
-    // 原本嘅 condition 有 fall-through bug:
-    //   if (!user || (!hasPermission(user, 'tasks.edit') && ...))
-    //     if (user?.role === 'developer' && (title || ...)) return 403
-    //
-    // 當 developer 有 tasks.edit perm(seed 入面 developer permissions 包括
-    // "tasks.edit"),個 outer if 條件 false → 唔入 inner if → 落到
-    // prisma.task.update 改 title/description 成功,變越權。
-    //
-    // Fix:explicit 拎出 canEditTaskFields 純 function + 嚴格 fall-through 結構。
-    // 任何「有 field 但 developer」一律 return 403。
+    // Field-level update gate. Developer default role has tasks.edit, so it can
+    // save the edit task modal. Custom roles can still use tasks.edit_fields.
     const hasEditFields = canEditTaskFields(user)
-    if (!hasEditFields) {
-      if (
-        user?.role === 'developer' &&
-        (title || description || assigneeId !== undefined || assigneeIds || participantIds || parentTaskId !== undefined || estimatedHours !== undefined || requirementIds !== undefined)
-      ) {
-        set.status = 403
-        return { error: { code: 'FORBIDDEN', message: "Permission denied: developer can only update status" } }
-      }
+    const isFieldUpdate =
+      title !== undefined ||
+      description !== undefined ||
+      assigneeId !== undefined ||
+      assigneeIds !== undefined ||
+      participantIds !== undefined ||
+      parentTaskId !== undefined ||
+      estimatedHours !== undefined ||
+      requirementIds !== undefined
+
+    if (isFieldUpdate && !hasEditFields) {
+      set.status = 403
+      return { error: { code: 'FORBIDDEN', message: "Permission denied: 'tasks.edit' is required" } }
     }
 
     const shouldReplaceParticipants = Array.isArray(participantIds) || Array.isArray(assigneeIds) || assigneeId !== undefined

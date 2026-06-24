@@ -85,15 +85,11 @@ describe('resolveTaskProjectId', () => {
   })
 })
 
-// 2026-06-10 RG-015: Developer 即使有 `tasks.edit` perm 都只可改 status。
-// 改 title / description / assignee / parentTaskId / estimatedHours 一定要
-// admin / tech_lead / 額外 perm `tasks.edit_fields`。
-//
-// 守住 invariant:developer role + tasks.edit perm → 唔可以改 fields(只可改 status)。
-// 原本 RBAC 結構有 fall-through bug — 個 outer if 條件 false 跳過 inner if,
-// developer PUT title 越權成功(200 instead of 403)。Unit test 守住
-// canEditTaskFields 嘅所有 boundary case。
-describe('canEditTaskFields (RG-015: developer cannot edit fields)', () => {
+// Task field edit gate:
+// admin / tech_lead / users with tasks.edit / users with tasks.edit_fields can edit task fields.
+// Developer default role includes tasks.edit, so the edit task modal should save successfully.
+// Users without either edit permission remain blocked from field-level updates.
+describe('canEditTaskFields', () => {
   test('admin role → true (full edit access)', () => {
     expect(canEditTaskFields({ role: 'admin' })).toBe(true)
     expect(canEditTaskFields({ role: 'admin', permissions: [] })).toBe(true)
@@ -104,11 +100,8 @@ describe('canEditTaskFields (RG-015: developer cannot edit fields)', () => {
     expect(canEditTaskFields({ role: 'tech_lead', permissions: [] })).toBe(true)
   })
 
-  test('RG-015 critical: developer role + tasks.edit perm → false (was fall-through bug)', () => {
-    // Developer 嘅 default permissions 已經有 `tasks.edit`,但呢個 perm
-    // 嘅語義只覆蓋 status update(同 Kanban drag-drop 對齊)。
-    // 改 fields 一定要額外 `tasks.edit_fields` perm 或者 admin/tech_lead role。
-    expect(canEditTaskFields({ role: 'developer', permissions: ['tasks.view', 'tasks.create', 'tasks.edit', 'bugs.view', 'bugs.create', 'bugs.edit', 'worklogs.view', 'worklogs.create'] })).toBe(false)
+  test('developer role + tasks.edit perm can edit task fields', () => {
+    expect(canEditTaskFields({ role: 'developer', permissions: ['tasks.view', 'tasks.create', 'tasks.edit', 'bugs.view', 'bugs.create', 'bugs.edit', 'worklogs.view', 'worklogs.create'] })).toBe(true)
   })
 
   test('developer role + tasks.edit_fields perm → true (opt-in for full edit)', () => {
@@ -116,7 +109,7 @@ describe('canEditTaskFields (RG-015: developer cannot edit fields)', () => {
   })
 
   test('tester role (no tasks.edit_fields) → false', () => {
-    expect(canEditTaskFields({ role: 'tester', permissions: ['tasks.view', 'tasks.create', 'tasks.edit', 'bugs.view', 'bugs.create', 'bugs.edit'] })).toBe(false)
+    expect(canEditTaskFields({ role: 'tester', permissions: ['bugs.view', 'bugs.create', 'bugs.edit'] })).toBe(false)
   })
 
   test('pm role (legacy) → false (pm does NOT auto-have tech_lead-equivalent edit; canEditTaskFields 是 field-level gate)', () => {

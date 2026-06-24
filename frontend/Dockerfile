@@ -19,7 +19,7 @@ COPY --from=build /app/dist/ /usr/share/nginx/html/
 # host can't bind privileged 443). See docker-entrypoint.sh.
 COPY nginx.conf.template /etc/nginx/nginx.conf.template
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 EXPOSE 80
 
