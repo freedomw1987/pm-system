@@ -109,7 +109,7 @@ export default function WorkLogsPage() {
 
   const loadUsers = async () => {
     try {
-      const res = await userApi.list()
+      const res = await userApi.list({ limit: -1 })
       // Normalize user shape → UserOption (UserAutocomplete 攞 department.id/name)
       // 後端 user wire 可能係 {department: {id, name}} 或 {departmentId: 'xxx'},
       // 兩種都 handle,統一餵畀 autocomplete。

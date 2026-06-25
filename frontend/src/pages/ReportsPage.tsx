@@ -96,7 +96,7 @@ export default function ReportsPage() {
   }
   const loadUsers = async () => {
     try {
-      const res = await userApi.list()
+      const res = await userApi.list({ limit: -1 })
       const raw: any[] = res.data.users || []
       setUsers(raw.map((u) => ({
         id: u.id, name: u.name, email: u.email,

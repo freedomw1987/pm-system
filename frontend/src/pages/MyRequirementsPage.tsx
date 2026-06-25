@@ -60,7 +60,7 @@ export default function MyRequirementsPage() {
 
   const loadProjects = async () => {
     try {
-      const res = await projectApi.list()
+      const res = await projectApi.list({ limit: -1 })
       setProjects(res.data.projects || [])
     } catch (err) {
       console.error(err)

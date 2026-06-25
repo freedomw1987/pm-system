@@ -305,7 +305,7 @@ export default function ChatPage() {
 
   const fetchProjects = async () => {
     try {
-      const res = await api.get('/projects')
+      const res = await api.get('/projects', { params: { limit: -1 } })
       setProjects(res.data.projects || [])
     } catch (e) {
       console.error(e)
