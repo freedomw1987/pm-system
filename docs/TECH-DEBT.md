@@ -1,6 +1,6 @@
 # PM System — Tech Debt Register
 
-> **Status**: 2026-06-08 snapshot (Sprint 3 ACT-14/15 closure)
+> **Status**: 2026-06-23 snapshot (post-Sprint-21 follow-up: 3 new debt entries TD-NEW-8/9/10, candidate for Sprint 22)
 > **Format**: 模板化追蹤,參考 `tech-debt-register` skill
 
 ---
@@ -190,6 +190,76 @@
 
 ---
 
+### 🟡 TD-NEW-8: 2495812 wiki upload debug log 殘留喺 HEAD code
+
+- **發現日期**: 2026-06-23
+- **發現來源**: post-Sprint-21 commit audit (`docs/retros/_meta/post-sprint-21-debug-triage.md`)
+- **Commit**: `2495812` "debug for wiki upload" — 雖然 commit 包含真 fix (SSE heartbeat 10s timer),同時加咗 9 個 `console.log`/`console.warn` 喺 `backend/src/routes/documents.ts`
+- **影響**:
+  - **客戶 log 噪音**:batch-parse 進度 log 會寫入 `/var/lib/docker/containers/.../log` 10MB × 3 file rotation 入面,加咗噪音
+  - **資料外洩**:log 含 file name / size / LLM elapsed time / LLM error message,可能會被 support team 撈到
+  - **Sprint 21 retro 未提及**:close 嗰陣只標記 "Wiki 上傳格式 + 檔名 + 重覆偵測 + 窗口 10 + 跨項目",遺留咗 debug log
+- **修復成本**: 0.5 日(11 個 statement wrap 入 `if (DEBUG)` 或刪除,加 env var + 回歸 test)
+- **業務影響**: Medium — 客戶 log file 容量會脹,support 時要 filter
+- **建議**: **P0 for Sprint 22**(影響 customer-facing output)
+- **目標 Sprint**: Sprint 22 (2026-06-23 ~ 06-29)
+- **修復方案**:
+  ```ts
+  // 方案 A(env-gated,保留診斷能力):
+  const DEBUG = process.env.NODE_ENV !== 'production' || process.env.DEBUG_BATCH_PARSE === '1'
+  // ...所有 console.log 改 if (DEBUG) console.log(...)
+  // 方案 B(直接刪):清晒 9 個 statement,生產環境唔需要
+  ```
+- **殘留位置**:`backend/src/routes/documents.ts` lines 438, 502, 511, 658, 662(safeSend), 1172, 1190, 1199, 1221, 1227
+- **守到**:`bun test src/routes/documents.test.ts` 30/30 pass(改動唔影響 test,但 ship 前必須清)
+
+### 🟡 TD-NEW-9: nginx SSE 4-commit workaround chain 應該 eventually 重整
+
+- **發現日期**: 2026-06-23
+- **發現來源**: post-Sprint-21 commit audit + nginx -t smoke test
+- **Commits**: `84cc263` (disable http2) → `16d0806` (drop `proxy_buffering off`) → `d2fd2f1` (keepalive_timeout 0) → `64a37fb` (3 層 Connection: close 防線)
+- **影響**:
+  - **TLS handshake 成本**:每個 request 都新 connection(keepalive_requests 1),SPA 載入時 ~30 個 request × 1ms TLS handshake = 30ms overhead
+  - **Static asset cache 失效**:即使瀏覽器有 cache,npm build artifact 改咗之後所有 asset 要重新 fetch
+  - **HTTP/2 永久 lost**:disable 咗 HTTP/2 multiplexing 對 single SPA reload 影響唔大,但 future API 引入 WebSocket / SSE multiplex 會重受影響
+- **修復成本**: 1-2 日(investigate nginx 1.27+ HTTP/2 streaming fix,可能改用 `grpc_socket_keepalive` 或 migrate 去 Cloudflare 邊緣 proxy)
+- **業務影響**: Low — 當前 workaround 工作正常,性能 overhead 唔影響 UX
+- **建議**: **P1 for Sprint 22-23**(追蹤 upstream nginx fix,唔係 fire-fighting)
+- **目標 Sprint**: Sprint 22 起步 → 23 closure
+- **需要寫嘅文檔**:`docs/SSE-NGINX-TUNING.md` capture 5-commit 嘅 rejection history,避免下個人手賤 reset
+- **監控點**:
+  - nginx 1.27+ release notes(`ngx_http_v2_module` streaming fix)
+  - Cloudflare 邊緣 SSE 行為
+  - 客戶投訴 "page slow" 嘅實際測量數據
+
+### 🟡 TD-NEW-10: Docker backend upload file storage + attachment-integrity check
+
+- **發現日期**: 2026-06-23
+- **發現來源**: post-Sprint-21 commit audit (`5340f30` "chord: for docker backend upload file storage")
+- **Commit**: `5340f30` + `92b5820` build-release 配合
+- **引入嘅新組件**:
+  - `backend/Dockerfile` 加 `VOLUME ["/app/uploads"]` hint
+  - `deploy/docker-compose.client.yml` mount `pm-system-uploads:/app/uploads`(named volume,跨 container recreate persist)
+  - `deploy/install.sh` 加 explicit `docker volume create pm-system-uploads` check
+  - `backend/src/utils/attachment-integrity.ts`(144 行)— startup self-check scan Attachment table,搵 `storedPath` 喺 disk 唔存在嘅 row
+  - `backend/src/index.ts` start 嗰陣跑 `checkAttachmentIntegrity().then(logAttachmentIntegrity)`,non-blocking
+  - `scripts/build-release.sh` 配合 re-tag (詳見 t2 audit)
+- **影響 / 好處**:
+  - ✅ **永久 fix 之前嘅 data loss bug**:`/app/uploads` 之前冇 volume mount,container recreate 會 wipe 原始 uploaded file
+  - ✅ **早期 warning 機制**:升級 v1.0.7 嘅客戶第一次 boot 就會見到 pre-existing missing files log,知道有幾多 orphan row
+  - ⚠️ **只係 detect 唔係 recover**:`checkAttachmentIntegrity` 只 log,唔補回 file(cannot recover,file 真係冇咗)
+- **修復成本**: 0(已 ship,只係 follow-up 項目)
+- **業務影響**: Low — 監察 startup log 同 customer support ticket
+- **建議**: **P1 for Sprint 22**(加 monitoring + alert rule,防止 silent orphan drift)
+- **目標 Sprint**: Sprint 22
+- **跟進項目**:
+  - 客戶升級 v1.0.7 之後第一個 sprint,review startup log 入面 `[attachment-integrity]` 嘅 output,如果有 > 0 missing → 通知客戶
+  - 加 admin endpoint `GET /api/attachments/integrity-report` 畀客戶自己 check
+  - 文件更新: `deploy/README.md` 加 "what to do if integrity check reports missing files"
+- **相關 audit**:`docs/retros/_meta/build-release-audit-2026-06-23.md`
+
+---
+
 ## 從 commit 看到嘅「快速 fix」
 
 | Commit | 描述 | 反映嘅 debt |
@@ -253,6 +323,12 @@
 - **守住**:`docker compose up -d --build` 0 error + E2E 75 pass + 8 skipped, 0 fail(Sprint 17 baseline 69 → 75,+6 spec)
 - **紅線狀態**:紅線 11/12/13/15 全綠(strict + unify + error boundary + formevent migration 全部跟住既有 pattern 唔違反 invariant)
 
+### Sprint 22 (candidate, 2026-06-23 ~ 06-29) — 3 個 follow-up 開 ticket
+- [ ] **TD-NEW-8** (P0): 清 `2495812` 殘留嘅 9 個 console.log/warn — wrap 入 `if (DEBUG)` 或刪除。**影響 customer-facing log 噪音 + 資料外洩**。
+- [ ] **TD-NEW-9** (P1): 寫 `docs/SSE-NGINX-TUNING.md` capture 4-commit nginx SSE workaround 嘅 rejection history,防下個人手賤 reset。追蹤 nginx 1.27+ HTTP/2 streaming fix。
+- [ ] **TD-NEW-10** (P1): Docker backend upload file storage 跟進 — 加 admin endpoint `GET /api/attachments/integrity-report` 畀客戶自己 check orphan file 數量;文件更新 `deploy/README.md`。
+- **前置 audit**:`docs/retros/_meta/post-sprint-21-debug-triage.md` + `docs/retros/_meta/build-release-audit-2026-06-23.md` + `docs/retros/_meta/post-sprint-21-regression-2026-06-23.md`
+
 ---
 
 ## 變更歷史
@@ -275,3 +351,5 @@
 | 2026-06-09 | Sprint 5:TD-003 / TD-004 / TD-014 全部清,P0 debt 100% 清除;Dockerfile multi-stage(673→651MB,-3.3%);RBAC cache dead code 殘留清(RG-009);WS handler 抽純 helpers 17 unit test(RG-010);499/499 unit test pass;frontend `WorkLogsPage.tsx:413 await in forEach` pre-existing issue 阻 docker stack 起,E2E 留住下一步 fix |
 | 2026-06-09 | Sprint 5 closure 2:frontend build fix(async onClick + try/catch)+ Dockerfile 漏 COPY prisma.config.ts(RG-011,Prisma 7 strict config)+ prisma.config.ts 改用 `env()` helper;docker compose up -d OK,E2E 13/17 pass(4 個 rbac-negative 失敗因 rate-limit 5/60s 撞 manual + 11 login attempts,屬 E2E 設計問題非 code bug) |
 | 2026-06-10 | Sprint 19:TD-007 ✅(LLM API Key audit log + audit endpoint),TD-009 ✅(WorkLog timezone UTC),TD-010 ✅(JSON structured logging) |
+| 2026-06-23 | **Post-Sprint-21 audit** (t1-t4): 新增 TD-NEW-8 (`2495812` console.log 殘留,P0)、TD-NEW-9 (nginx SSE workaround chain,P1)、TD-NEW-10 (docker backend upload file storage + attachment-integrity,P1);Sprint 22 候選行動加入 plan |
+| 2026-06-23 | **Audit reports**:`docs/retros/_meta/post-sprint-21-changelog.md`(t1)、`post-sprint-21-debug-triage.md`(t3)、`build-release-audit-2026-06-23.md`(t2)、`post-sprint-21-regression-2026-06-23.md`(t4) |

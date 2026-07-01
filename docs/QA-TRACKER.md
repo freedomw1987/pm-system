@@ -1,6 +1,16 @@
 # PM System — QA Tracker (US ↔ Test 對照)
 
-> **Status**: 🟢 2026-06-11 — Sprint 20 closure,Reports 多視角 + 導出 + 4 個 UX 改進,Backend unit 645 pass,Frontend component 88 pass
+> **Status**: 🟢 2026-06-23 — Post-Sprint-21 audit closure: 84 tests pass / 0 fail,新增 3 個 TECH-DEBT entry (TD-NEW-8/9/10) 候選 Sprint 22;Backend unit 645→671(+26),Frontend component 88 baseline 不變
+> **Update**: 2026-06-23 Post-Sprint-21 audit (t1-t4 sweep) — 0 個新增 test 改動,3 個新 TECH-DEBT entry 開 ticket:
+>   - **Backend** `documents.test.ts` 28→30(+2 safeSend race tests by `88c582d`);`wikis.test.ts` 30 pass(US-21.3 replace + membership gate);`wiki-search.test.ts` + `wiki-dedup.test.ts` 24 pass(US-21.4 metadata + 12 dedup cases)
+>   - **Frontend** 0 改(本 sprint 純 backend/infra hotfix,frontend 未動)
+>   - **Infra** nginx config smoke test PASS(5-commit SSE fix compose 成 valid config);docker build-release 配對 audit 確認 image tag flow 一致
+>   - **Tech debt 留底 (3 個 P0/P1, Sprint 22 candidate)**:
+>     - **TD-NEW-8** (P0): `2495812` 殘留 9 個 `console.log`/`console.warn` 喺 `documents.ts` (lines 438, 502, 511, 658, 662, 1172, 1190, 1199, 1221, 1227)— 影響客戶 log 噪音 + 資料外洩
+>     - **TD-NEW-9** (P1): nginx SSE 4-commit workaround chain (`84cc263`/`16d0806`/`d2fd2f1`/`64a37fb`) 應該 eventually 重整,需寫 `docs/SSE-NGINX-TUNING.md` 鎖住 rejection history
+>     - **TD-NEW-10** (P1): docker backend upload file storage 跟進 — `5340f30` 已 ship `pm-system-uploads` named volume + `attachment-integrity` startup check,Sprint 22 加 admin endpoint 畀客戶查 orphan file
+>   - **Audit reports**:`docs/retros/_meta/post-sprint-21-changelog.md`(t1)、`post-sprint-21-debug-triage.md`(t3)、`build-release-audit-2026-06-23.md`(t2)、`post-sprint-21-regression-2026-06-23.md`(t4)
+>   - **Sprint 21 retro** (`2026-06-16-sprint-21-wiki-improvements.md`) **未提及** 2495812 殘留 console.log,呢個係 retro audit gap,Sprint 22 retro 模板要加 "debug log residue" 檢查項
 > **Update**: 2026-06-11 Sprint 20 — Reports 多視角 + Excel/PDF 導出 + 4 個 UX 改進:
 >   - **Backend** 2 個新 endpoint:`GET /reports/by-department`(部門視角,跨項目聚合成員時數+進度)、`GET /reports/by-user`(個人視角,每日小時序列填 0 補齊)+ 既有 `tasks` / `bugs` PUT 加 `requirementIds` / `requirementId` 支援
 >   - **Frontend** `ReportsPage` 完全重寫為 3 視角 tab(📊 項目 / 🏢 部門 / 👤 個人),每視角右上有 📥 Excel + 📄 PDF 按鈕;3 個新 autocomplete 共用元件(`UserAutocomplete` / `DepartmentAutocomplete` / `RequirementAutocomplete`)+ `pdfExport.ts` 工具(jspdf-autotable,中文字型 fallback 英文表頭)
@@ -236,6 +246,37 @@
   - `EditTaskModal` 共用 `<AddTaskModal>` props pattern(只係 `submitLabel` + `onSubmit` 唔同,可省 ~100 行 inline)
   - `useTaskFormState` custom hook(等到 3rd caller 出現先抽)
 
+### Post-Sprint-21 (2026-06-23) 收工摘要 — 4-task audit sweep + 3 TECH-DEBT entries
+
+- **目標**:Sprint 21 closure 之後,David 委託做 4 個 audit task (t1-t4),識別後續 debt + 驗證 ship-readiness
+- **Task 結果**:
+  - **t1 commit audit** (`docs/retros/_meta/post-sprint-21-changelog.md`):16 個 post-retro commit 按 4 大主題分組 (release-build / docker upload / LLM timeout / wiki upload debug),所有改動有對應 audit trail
+  - **t2 build-release audit** (`docs/retros/_meta/build-release-audit-2026-06-23.md`):image name / env var / volume / port 全部對齊,`shasum` 改 `sha256sum` (F6) 係唯一 CI blocker,`deploy/dist` v1.0.5 stale tarball (F1) ship 前要 re-build
+  - **t3 debug commit triage** (`docs/retros/_meta/post-sprint-21-debug-triage.md`):9 個 commit 評估 — 7 個 clean real fix,`e1382fa` commit message 誤導 (但係真 fix),`2495812` 半成品 (真 fix + 9 殘留 console.log)
+  - **t4 regression sweep** (`docs/retros/_meta/post-sprint-21-regression-2026-06-23.md`):`bun test` 3 條 suite 84/84 pass + nginx -t PASS,**0 new failure**
+- **新增 TECH-DEBT entries** (見 TECH-DEBT.md 對應 section):
+  - **TD-NEW-8** (P0): 2495812 console.log 殘留 — 影響 customer-facing log 噪音
+  - **TD-NEW-9** (P1): nginx SSE 4-commit workaround 應該 eventually 重整,需寫 `docs/SSE-NGINX-TUNING.md`
+  - **TD-NEW-10** (P1): docker backend upload file storage 跟進 — 客戶升級 v1.0.7 後 review `[attachment-integrity]` log,加 admin endpoint
+- **Verification**:
+  - `bun test src/routes/documents.test.ts` → 30/30 pass [206ms]
+  - `bun test src/routes/wikis.test.ts` → 30/30 pass [25ms]
+  - `bun test src/routes/wiki-search.test.ts src/utils/wiki-dedup.test.ts` → 24/24 pass [233ms]
+  - `docker run --rm nginx:alpine nginx -t -c /tmp/nginx.conf` → syntax ok, test successful
+- **意外發現 / 教訓**:
+  - **Commit message hygiene**:`debug:` 標籤被誤用 — `e1382fa` 係真 fix 唔係 debug,`2495812` 雖然含真 fix 但 commit message 同 content 唔 match
+  - **Sprint 21 retro gap**:retro file 只記錄 "Sprint 21 closed" 但冇 audit 個別 commit 嘅 `console.log` 殘留。Sprint 22 retro 模板要加 "residual debug log check" 段
+  - **docker `shasum` macOS-only**:`scripts/build-release.sh:187` 用 `shasum -a 256` Linux CI 必 fail,屬 P0 CI blocker
+  - **nginx -t 需要 fake host**:standalone container 解析唔到 docker-compose service name,smoke test 需要 `--add-host backend:127.0.0.1` 或 `echo '127.0.0.1 backend' >> /etc/hosts`
+- **紅線狀態**:紅線 11(tracker 同步)✅ — 3 個新 entry 已 register;紅線 12(regression test)✅ — t4 sweep 全綠;紅線 13(unify / no user bug fix)N/A — audit-only sprint
+- **Out of scope(留俾 Sprint 22)**:
+  - 清 `2495812` 9 個 console.log (TD-NEW-8) — customer-facing impact
+  - 寫 `docs/SSE-NGINX-TUNING.md` (TD-NEW-9) — 防 nginx config regression
+  - 加 `GET /api/attachments/integrity-report` admin endpoint (TD-NEW-10)
+  - 改 `shasum` → `sha256sum` + fallback (CI blocker from t2)
+  - Re-build `deploy/dist` v1.0.6 (stale tarball from t2 F1)
+- **Retro audit reports**:`docs/retros/_meta/post-sprint-21-*.md`(4 份)
+
 ### Sprint 16 (2026-06-10) 收工摘要 — Dashboard minimal layout
 
 - **目標**:David feedback「Dashboard 只要 show 自己有參與的項目的統計 和項目清單吧」(2026-06-10 follow-up 上 Sprint 15 收工後)
@@ -431,6 +472,7 @@
 | 2026-06-09 | **Sprint 8 closure — Server-side Pagination**:4 個 list endpoint(projects/requirements/tasks/bugs)+ 5 個 list page 全部接 server-side pagination;新 `computePagination` 共用 helper(default 20 / max 100)鏡 worklogs `limit=-1` 模式;response 向後兼容(keep 原 array 名 + add `totalCount`/`page`/`pageSize`/`totalPages`);新 `<Pagination>` controlled component;status/project filter 改 server-side;pagination helper 17 個 unit test + 9 個 E2E;Unit 499→516(+17),E2E 33→42(+9 pagination E2E),Frontend `tsc` clean,Frontend `vite build` clean |
 | 2026-06-09 | **Sprint 9 closure — Sub-list pagination + Reports stats consistency**:sub-list 全部接 server-side pagination(`ProjectDetailPage` 3 tabs + `RequirementDetailPage` 2 sub-lists + `UsersPage`);`/api/reports/cost` + `/api/reports/progress` 修 bug — 用 `where.OR` pattern 同 worklogs 對齊,統計一致化;33 個新 unit test(pagination response shape + RBAC gates + 成本 where 修 + 進度 status enum + percent math),10 個新 E2E(7 sub-list UI + 1 user UI + 2 reports cost leak);Unit 516→549(+33),E2E 42→52(+10),Frontend `tsc` clean;US-11.1 升 PASS-UNIT,US-11.2 升 PASS-UNIT+PASS-E2E(雙綠) |
 | 2026-06-10 | **Sprint 17 closure — AddTaskModal unification + E2E regression guard**:新 `AddTaskModal.tsx` 共用 component(216 行,8 個 field/control single source of truth)取代 ProjectKanban 嘅 inline 76-line modal(原缺 RichText / 智能分配 / 參與人 / 父任務);new spec `e2e/tests/add-task-modal-unified.spec.ts` 3 test 8.1s pass — T1 + T2 分別 cover Task Tab / Kanban 入口 11 個 visibility snapshot key,T3 set-diff 守住「兩入口 modal field set = ∅」cross-entry invariant;E2E 63→66(+3),Unit 606 baseline 不變(frontend-only);Sprint 15/16 retro 同步收口 `docs/retros/2026-06-10-sprint-17-modal-unify-and-closure.md`;紅線 11/12 ✅,紅線 13 N/A |
+| 2026-06-23 | **Post-Sprint-21 audit closure (t1-t4 sweep)**:4 個 audit task 全部完成,84 tests pass / 0 fail + nginx -t PASS;3 個新 TECH-DEBT entry (TD-NEW-8/9/10) 開 ticket 候選 Sprint 22;audit reports 4 份入 `docs/retros/_meta/` |
 
 ---
 
